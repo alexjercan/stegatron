@@ -135,6 +135,8 @@ static void usage() {
             COMMAND_VERSION);
     fprintf(stdout, "    %s - Show this help message\n", COMMAND_HELP);
     fprintf(stdout, "\n");
+    fprintf(stdout, "You can use --help for more information on each command.\n");
+    fprintf(stdout, "\n");
 }
 
 static Aids_Result steg_hide(Steg_Hide_Args args) {
