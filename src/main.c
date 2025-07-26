@@ -18,8 +18,6 @@
 #define COMMAND_VERSION "version"
 #define COMMAND_HELP "help"
 
-#define COMPRESSION_DEFAULT 4
-
 typedef struct {
     const char *image_path;  // Path to the image file
     const char *output_path; // Path to save the modified image
