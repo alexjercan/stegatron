@@ -10,6 +10,13 @@ static const char *steg__g_failure_reason;
 
 #define BYTE_SIZE 8
 
+static bool steg__validate_compression(int compression) {
+    bool is_in_range = (compression > 0 && compression <= BYTE_SIZE);
+    bool is_power_of_two = (compression & (compression - 1)) == 0;
+
+    return is_in_range && is_power_of_two;
+}
+
 static void steg__util_hide_lsbn(unsigned char *ptr, unsigned char byte, size_t count) {
     for (size_t i = 0; i < BYTE_SIZE / count; i++) {
         unsigned char ptr_byte = ptr[i];
@@ -41,7 +48,7 @@ STEGDEF Steg_Result steg_hide_lsb(uint8_t *bytes, size_t bytes_length,
                                   size_t payload_length, int compression) {
     Steg_Result result = STEG_OK;
 
-    if (compression <= 0 || compression > BYTE_SIZE) {
+    if (!steg__validate_compression(compression)) {
         steg__g_failure_reason = "Invalid compression value";
         return_defer(STEG_ERR);
     }
@@ -70,7 +77,7 @@ STEGDEF Steg_Result steg_show_lsb(uint8_t *bytes, size_t bytes_length,
                                   size_t *message_length, int compression) {
     Steg_Result result = STEG_OK;
 
-    if (compression <= 0 || compression > BYTE_SIZE) {
+    if (!steg__validate_compression(compression)) {
         steg__g_failure_reason = "Invalid compression value";
         return_defer(STEG_ERR);
     }

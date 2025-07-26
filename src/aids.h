@@ -162,13 +162,13 @@ void aids_log_msg(Aids_Log_Level level, const char* file, int line, const char *
 {
     switch (level) {
     case AIDS_INFO:
-        fprintf(stderr, AIDS_TERMINAL_BLUE "INFO " AIDS_TERMINAL_RESET ": %s:%d: ", file, line);
+        fprintf(stderr, AIDS_TERMINAL_BLUE "INFO" AIDS_TERMINAL_RESET ": %s:%d: ", file, line);
         break;
     case AIDS_WARNING:
-        fprintf(stderr, AIDS_TERMINAL_YELLOW "[WARNING] " AIDS_TERMINAL_RESET ": %s:%d: ", file, line);
+        fprintf(stderr, AIDS_TERMINAL_YELLOW "WARNING" AIDS_TERMINAL_RESET ": %s:%d: ", file, line);
         break;
     case AIDS_ERROR:
-        fprintf(stderr, AIDS_TERMINAL_RED "[ERROR] " AIDS_TERMINAL_RESET ": %s:%d: ", file, line);
+        fprintf(stderr, AIDS_TERMINAL_RED "ERROR" AIDS_TERMINAL_RESET ": %s:%d: ", file, line);
         break;
     case AIDS_NO_LOGS: return;
     default:
