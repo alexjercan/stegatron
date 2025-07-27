@@ -372,8 +372,10 @@ static int command_show_fft(int argc, char **argv) {
 
 static void usage() {
     fprintf(stdout, "usage: %s <SUBCOMMAND> [OPTIONS]\n", PROGRAM_NAME);
-    fprintf(stdout, "    %s - Hide a message in an image\n", COMMAND_HIDE_LSB);
-    fprintf(stdout, "    %s - Show a hidden message in an image\n", COMMAND_SHOW_LSB);
+    fprintf(stdout, "    %s - Hide a message in an image using LSB\n", COMMAND_HIDE_LSB);
+    fprintf(stdout, "    %s - Show a hidden message in an image using LSB\n", COMMAND_SHOW_LSB);
+    fprintf(stdout, "    %s - Hide a message in an image using FFT\n", COMMAND_HIDE_FFT);
+    fprintf(stdout, "    %s - Show a hidden message in an image using FFT\n", COMMAND_SHOW_FFT);
     fprintf(stdout, "    %s - Show the version of the program\n", COMMAND_VERSION);
     fprintf(stdout, "    %s - Show this help message\n", COMMAND_HELP);
     fprintf(stdout, "\n");
