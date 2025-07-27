@@ -1,0 +1,12 @@
+#ifndef FFT_H
+#define FFT_H
+
+#include <complex.h>
+
+void fft_simple(complex double *x, unsigned long n, complex double *x_out);
+void ifft_simple(complex double *x, unsigned long n, complex double *x_out);
+
+void fft_dit(complex double *x, unsigned long n, complex double *x_out);
+void ifft_dit(complex double *x, unsigned long n, complex double *x_out);
+
+#endif // FFT_H
