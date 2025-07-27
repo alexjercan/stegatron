@@ -62,7 +62,6 @@ static int command_hide_lsb(int argc, char **argv) {
 
 
     if (argparse_parse(&parser, argc, argv) != ARG_OK) {
-        aids_log(AIDS_ERROR, "Error parsing arguments for %s command: %s", COMMAND_HIDE_LSB, argparse_failure_reason());
         argparse_print_help(&parser);
         exit(EXIT_FAILURE);
     }
@@ -145,7 +144,6 @@ static int command_show_lsb(int argc, char **argv) {
                                     .required = false});
 
     if (argparse_parse(&parser, argc, argv) != ARG_OK) {
-        aids_log(AIDS_ERROR, "Error parsing arguments for %s command: %s", COMMAND_SHOW_LSB, argparse_failure_reason());
         argparse_print_help(&parser);
         exit(EXIT_FAILURE);
     }
@@ -239,7 +237,6 @@ static int command_hide_fft(int argc, char **argv) {
                                     .required = false});
 
     if (argparse_parse(&parser, argc, argv) != ARG_OK) {
-        aids_log(AIDS_ERROR, "Error parsing arguments for %s command: %s", COMMAND_HIDE_FFT, argparse_failure_reason());
         argparse_print_help(&parser);
         return AIDS_ERR;
     }
@@ -309,7 +306,6 @@ static int command_show_fft(int argc, char **argv) {
                                     .required = false});
 
     if (argparse_parse(&parser, argc, argv) != ARG_OK) {
-        aids_log(AIDS_ERROR, "Error parsing arguments for %s command: %s", COMMAND_SHOW_FFT, argparse_failure_reason());
         argparse_print_help(&parser);
         exit(EXIT_FAILURE);
     }
