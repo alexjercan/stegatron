@@ -111,37 +111,29 @@ defer:
     return result;
 }
 
-static void steg__util_hide_fft(complex double *ptr, unsigned char byte) {
-    for (size_t i = 0; i < BYTE_SIZE; i++) {
-        unsigned char bit = ((byte >> (BYTE_SIZE - i - 1)) & 0b00000001);
-        double flag = bit == 0 ? 0.0 : 0.1;
-        ptr[i] = floor(creal(ptr[i])) + cimag(ptr[i]) * I + flag;
-    }
-}
+#define ALPHA 0.1f // Adjust alpha as needed
 
-static void steg__util_show_fft(const complex double *ptr, unsigned char *byte) {
-    for (size_t i = 0; i < BYTE_SIZE; i++) {
-        double real = creal(ptr[i]);
-        unsigned char bit = (real - floor(real) >= 0.9) & 0b00000001;
-        *byte |= (bit << (BYTE_SIZE - i - 1));
-    }
-}
-
-STEGDEF Steg_Result steg_hide_fft(uint8_t *bytes, size_t bytes_length,
+STEGDEF Steg_Result steg_hide_fft(uint8_t *bytes, size_t width, size_t height,
                                   const uint8_t *payload,
                                   size_t payload_length) {
     complex double *x = NULL;
-    complex double *x_out = NULL;
+    size_t bytes_length = width * height * 3;
 
     Steg_Result result = STEG_OK;
 
-    if ((bytes_length & (bytes_length - 1)) != 0) {
+    if ((width & (width - 1)) != 0 || (height & (height - 1)) != 0) {
         steg__g_failure_reason = "The input data is not a power of 2 shape.";
         return_defer(STEG_ERR);
     }
 
-    if (payload_length * BYTE_SIZE + sizeof(size_t) * BYTE_SIZE > bytes_length) {
-        steg__g_failure_reason = "Data is too big for the cover image";
+    size_t margin_y = 1, margin_x = 1;
+    float alpha = ALPHA;
+
+    size_t payload_width = (width - 2 * margin_x) / 2;
+    size_t payload_height = height - 2 * margin_y;
+
+    if (payload_length > payload_width * payload_height) {
+        steg__g_failure_reason = "Payload is too large for the cover image";
         return_defer(STEG_ERR);
     }
 
@@ -155,51 +147,75 @@ STEGDEF Steg_Result steg_hide_fft(uint8_t *bytes, size_t bytes_length,
         x[i] = (double)bytes[i] / 255.0 + 0.0*I;
     }
 
-    x_out = AIDS_REALLOC(NULL, bytes_length * sizeof(complex double));
-    if (x == NULL) {
+    complex double *fft_r = AIDS_REALLOC(NULL, sizeof(complex double) * width * height);
+    if (fft_r == NULL) {
         steg__g_failure_reason = aids_failure_reason();
         return_defer(STEG_ERR);
     }
-    memset(x_out, 0, bytes_length * sizeof(complex double));
 
-    fft_dit(x, bytes_length, x_out);
-
-    for (size_t i = 0; i < sizeof(size_t); i++) {
-        unsigned char length_byte = ((unsigned char*)&payload_length)[i];
-        steg__util_hide_fft(x_out + i * BYTE_SIZE, length_byte);
+    for (size_t i = 0; i < width * height; i++) {
+        fft_r[i] = x[i * 3 + 0];
     }
 
-    for (size_t i = 0; i < payload_length; i++) {
-        unsigned char byte = payload[i];
-        steg__util_hide_fft(x_out + i * BYTE_SIZE + sizeof(size_t) * BYTE_SIZE, byte);
+    fft2d(fft_r, width, height, fft_r);
+
+    for (size_t y = 0; y < payload_height; y++) {
+        bool yes = true;
+
+        for (size_t x = 0; x < payload_width; x++) {
+            size_t index = y * payload_width + x;
+            if (index >= payload_length) {
+                yes = false;
+                break;
+            }
+
+            double payload_value = (double)payload[index] / 255.0;
+
+            size_t ty = margin_y + y;
+            size_t tx = margin_x + x;
+            size_t tx_mirror = width - 1 - tx;
+
+            printf("Payload value at (%zu, %zu): %f\n", ty, tx, payload_value);
+
+            fft_r[ty * width + tx] += payload_value * alpha;
+            fft_r[ty * width + tx_mirror] += payload_value * alpha;
+        }
+
+        if (!yes) {
+            break;
+        }
     }
 
-    memset(x, 0, bytes_length * sizeof(complex double));
-    ifft_dit(x_out, bytes_length, x);
+    ifft2d(fft_r, width, height, fft_r);
 
-
-    for (size_t i = 0; i < bytes_length; i++) {
-        bytes[i] = floor(creal(x[i]) * 255.0);
+    for (size_t i = 0; i < width * height; i++) {
+        bytes[i * 3 + 0] = fmin(fmax(creal(fft_r[i]) * 255.0, 0), 255);
     }
 
 defer:
     if (x != NULL) AIDS_FREE(x);
-    if (x_out != NULL) AIDS_FREE(x_out);
 
     return result;
 }
 
-STEGDEF Steg_Result steg_show_fft(uint8_t *bytes, size_t bytes_length,
+STEGDEF Steg_Result steg_show_fft(uint8_t *bytes, size_t width, size_t height,
                                   uint8_t **message, size_t *message_length) {
     complex double *x = NULL;
-    complex double *x_out = NULL;
+    size_t bytes_length = width * height * 3;
 
     Steg_Result result = STEG_OK;
 
-    if ((bytes_length & (bytes_length - 1)) != 0) {
+    if ((width & (width - 1)) != 0 || (height & (height - 1)) != 0) {
         steg__g_failure_reason = "The input data is not a power of 2 shape.";
         return_defer(STEG_ERR);
     }
+
+    size_t margin_y = 1, margin_x = 1;
+    float alpha = ALPHA;
+
+    size_t payload_width = (width - 2 * margin_x) / 2;
+    size_t payload_height = height - 2 * margin_y;
+    size_t max_payload_length = payload_width * payload_height;
 
     x = AIDS_REALLOC(NULL, bytes_length * sizeof(complex double));
     if (x == NULL) {
@@ -211,45 +227,60 @@ STEGDEF Steg_Result steg_show_fft(uint8_t *bytes, size_t bytes_length,
         x[i] = (double)bytes[i] / 255.0 + 0.0*I;
     }
 
-    x_out = AIDS_REALLOC(NULL, bytes_length * sizeof(complex double));
-    if (x == NULL) {
+    complex double *fft_r = AIDS_REALLOC(NULL, sizeof(complex double) * width * height);
+    if (fft_r == NULL) {
         steg__g_failure_reason = aids_failure_reason();
         return_defer(STEG_ERR);
     }
-    memset(x_out, 0, bytes_length * sizeof(complex double));
 
-    fft_dit(x, bytes_length, x_out);
-
-    for (size_t i = 0; i < sizeof(size_t); i++) {
-        steg__util_show_fft(x_out + i * BYTE_SIZE, ((unsigned char *)message_length) + i);
+    for (size_t i = 0; i < width * height; i++) {
+        fft_r[i] = x[i * 3 + 0];
     }
 
-    if (*message_length * BYTE_SIZE + sizeof(size_t) * BYTE_SIZE > bytes_length) {
-        steg__g_failure_reason = "Data is too big for the cover image";
+    fft2d(fft_r, width, height, fft_r);
+
+    *message_length = 0;
+    *message = AIDS_REALLOC(NULL, (max_payload_length + 1) * sizeof(unsigned char));
+    if (*message == NULL) {
+        steg__g_failure_reason = aids_failure_reason();
         return_defer(STEG_ERR);
     }
 
-    *message = AIDS_REALLOC(NULL, (*message_length + 1) * sizeof(unsigned char));
-    if (message == NULL) {
-        steg__g_failure_reason = "Memory allocation failed";
-        return_defer(STEG_ERR);
-    }
-    memset(*message, 0, (*message_length + 1) * sizeof(unsigned char));
+    memset(*message, 0, (max_payload_length + 1) * sizeof(unsigned char));
 
-    for (size_t i = 0; i < *message_length; i++) {
-        steg__util_show_fft(x_out + i * BYTE_SIZE + sizeof(size_t) * BYTE_SIZE, (*message) + i);
-    }
+    for (size_t y = 0; y < payload_height; y++) {
+        bool yes = true;
+        for (size_t x = 0; x < payload_width; x++) {
+            size_t index = y * payload_width + x;
 
-    memset(x, 0, bytes_length * sizeof(complex double));
-    ifft_dit(x_out, bytes_length, x);
+            printf("index: %zu, x: %zu, y: %zu\n", index, x, y);
 
-    for (size_t i = 0; i < bytes_length; i++) {
-        bytes[i] = floor(creal(x[i]) * 255.0);
+            if (index >= 10) { yes = false; break; } // Limit to first 10 payload bytes for debugging
+
+            size_t ty = margin_y + y;
+            size_t tx = margin_x + x;
+            size_t tx_mirror = width - 1 - tx;
+
+            double payload_value = (creal(fft_r[ty * width + tx]) +
+                                    creal(fft_r[ty * width + tx_mirror])) / (2.0 * alpha);
+
+            printf("Payload value at (%zu, %zu): %f\n", ty, tx, payload_value);
+
+            if (*message_length < max_payload_length) {
+                (*message)[*message_length] = (unsigned char)(fmin(fmax(payload_value * 255.0, 0), 255));
+                (*message_length)++;
+            }
+        }
+
+        if (!yes) {
+            break;
+        }
     }
 
 defer:
-    if (x != NULL) AIDS_FREE(x);
-    if (x_out != NULL) AIDS_FREE(x_out);
+    if (x == NULL) {
+        AIDS_FREE(x);
+    }
 
     return result;
 }

@@ -251,12 +251,11 @@ static int command_hide_fft(int argc, char **argv) {
     argparse_parser_free(&parser);
 
     int width, height, num_chan;
-    uint8_t *bytes = stbi_load(args.image_path, &width, &height, &num_chan, 4);
+    uint8_t *bytes = stbi_load(args.image_path, &width, &height, &num_chan, 0);
     if (bytes == NULL) {
         aids_log(AIDS_ERROR, "Error loading image: %s", stbi_failure_reason());
         exit(EXIT_FAILURE);
     }
-    size_t bytes_length = width * height * 4;
 
     Aids_String_Slice payload_slice = {0};
     if (aids_io_read(args.payload_path, &payload_slice, "rb") != AIDS_OK) {
@@ -266,12 +265,12 @@ static int command_hide_fft(int argc, char **argv) {
     const uint8_t *payload = (const uint8_t *)payload_slice.str;
     size_t payload_length = payload_slice.len;
 
-    if (steg_hide_fft(bytes, bytes_length, (const uint8_t *)payload, payload_length) != STEG_OK) {
+    if (steg_hide_fft(bytes, width, height, (const uint8_t *)payload, payload_length) != STEG_OK) {
         aids_log(AIDS_ERROR, "Error hiding message in image: %s", steg_failure_reason());
         exit(EXIT_FAILURE);
     }
 
-    if (stbi_write_png(args.output_path, width, height, 4, bytes, width * 4) == 0) {
+    if (stbi_write_png(args.output_path, width, height, num_chan, bytes, width * num_chan) == 0) {
         aids_log(AIDS_ERROR, "Error saving modified image: %s", stbi_failure_reason());
         exit(EXIT_FAILURE);
     }
@@ -321,15 +320,14 @@ static int command_show_fft(int argc, char **argv) {
     argparse_parser_free(&parser);
 
     int width, height, num_chan;
-    uint8_t *bytes = stbi_load(args.image_path, &width, &height, &num_chan, 4);
+    uint8_t *bytes = stbi_load(args.image_path, &width, &height, &num_chan, 0);
     if (bytes == NULL) {
         aids_log(AIDS_ERROR, "Error loading image: %s", stbi_failure_reason());
         exit(EXIT_FAILURE);
     }
-    size_t bytes_length = width * height * 4;
 
     size_t message_length = 0;
-    if (steg_show_fft(bytes, bytes_length, &message, &message_length) != STEG_OK) {
+    if (steg_show_fft(bytes, width, height, &message, &message_length) != STEG_OK) {
         aids_log(AIDS_ERROR, "Error showing message from image: %s", steg_failure_reason());
         exit(EXIT_FAILURE);
     }

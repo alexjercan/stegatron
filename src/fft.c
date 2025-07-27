@@ -1,6 +1,7 @@
 #include <complex.h>
 #include <stdlib.h>
 #include <math.h>
+#include <assert.h>
 
 #include "fft.h"
 
@@ -25,17 +26,12 @@ void ifft_simple(complex double *x, unsigned long n, complex double *x_out) {
     }
 }
 
-void fft_dit(complex double *x, unsigned long n, complex double *x_out) {
-    if ((n & (n - 1)) != 0) {
-        exit(1);
-    }
-
+static void fft__dit_internal(complex double *x, unsigned long n, complex double *x_out) {
     if (n == 1) {
         x_out[0] = x[0];
         return;
     }
 
-    // Split input into even and odd elements
     unsigned long half = n / 2;
     complex double *even = malloc(half * sizeof(complex double));
     complex double *odd  = malloc(half * sizeof(complex double));
@@ -44,26 +40,27 @@ void fft_dit(complex double *x, unsigned long n, complex double *x_out) {
         odd[i]  = x[2 * i + 1];
     }
 
-    // Allocate temporary arrays for recursive output
     complex double *fft_even = malloc(half * sizeof(complex double));
     complex double *fft_odd  = malloc(half * sizeof(complex double));
 
-    // Recursive calls
     fft_dit(even, half, fft_even);
     fft_dit(odd,  half, fft_odd);
 
-    // Combine
     for (unsigned long k = 0; k < half; ++k) {
         complex double twiddle = cexp(-2.0 * I * M_PI * k / n) * fft_odd[k];
         x_out[k]       = fft_even[k] + twiddle;
         x_out[k + half] = fft_even[k] - twiddle;
     }
 
-    // Clean up
     free(even);
     free(odd);
     free(fft_even);
     free(fft_odd);
+}
+
+void fft_dit(complex double *x, unsigned long n, complex double *x_out) {
+    assert((n & (n - 1)) == 0 && "n must be a power of 2");
+    fft__dit_internal(x, n, x_out);
 }
 
 static void ifft__dit_recursive(complex double *x, unsigned long n, complex double *x_out) {
@@ -74,7 +71,6 @@ static void ifft__dit_recursive(complex double *x, unsigned long n, complex doub
 
     unsigned long half = n / 2;
 
-    // Split even and odd
     complex double *even = malloc(half * sizeof(complex double));
     complex double *odd  = malloc(half * sizeof(complex double));
     for (unsigned long i = 0; i < half; ++i) {
@@ -82,21 +78,18 @@ static void ifft__dit_recursive(complex double *x, unsigned long n, complex doub
         odd[i]  = x[2 * i + 1];
     }
 
-    // Recursive outputs
     complex double *ifft_even = malloc(half * sizeof(complex double));
     complex double *ifft_odd  = malloc(half * sizeof(complex double));
 
     ifft__dit_recursive(even, half, ifft_even);
     ifft__dit_recursive(odd,  half, ifft_odd);
 
-    // Combine with positive sign for IFFT
     for (unsigned long k = 0; k < half; ++k) {
         complex double twiddle = cexp(2.0 * I * M_PI * k / n) * ifft_odd[k];
         x_out[k]        = ifft_even[k] + twiddle;
         x_out[k + half] = ifft_even[k] - twiddle;
     }
 
-    // Clean up
     free(even);
     free(odd);
     free(ifft_even);
@@ -104,14 +97,63 @@ static void ifft__dit_recursive(complex double *x, unsigned long n, complex doub
 }
 
 void ifft_dit(complex double *x, unsigned long n, complex double *x_out) {
-    if ((n & (n - 1)) != 0) {
-        exit(1);
-    }
+    assert((n & (n - 1)) == 0 && "n must be a power of 2");
 
     ifft__dit_recursive(x, n, x_out);
 
-    // Normalize the output
     for (unsigned long i = 0; i < n; ++i) {
         x_out[i] /= n;
     }
+}
+
+void fft2d(complex double *x, unsigned long width, unsigned long height, complex double *x_out) {
+    assert((width & (width - 1)) == 0 && "width must be a power of 2");
+    assert((height & (height - 1)) == 0 && "height must be a power of 2");
+
+    complex double *tmp = malloc(sizeof(complex double) * width * height);
+
+    for (int j = 0; j < height; j++) {
+        fft_dit(x + j * width, width, tmp + j * width);
+    }
+
+    for (int i = 0; i < width; i++) {
+        complex double col_in[height], col_out[height];
+        for (int j = 0; j < height; j++) {
+            col_in[j] = tmp[j * width + i];
+        }
+
+        fft_dit(col_in, height, col_out);
+
+        for (int j = 0; j < height; j++) {
+            x_out[j * width + i] = col_out[j];
+        }
+    }
+
+    free(tmp);
+}
+
+void ifft2d(complex double *x, unsigned long width, unsigned long height, complex double *x_out) {
+    assert((width & (width - 1)) == 0 && "width must be a power of 2");
+    assert((height & (height - 1)) == 0 && "height must be a power of 2");
+
+    complex double *tmp = malloc(sizeof(complex double) * width * height);
+
+    for (int j = 0; j < height; j++) {
+        ifft_dit(x + j * width, width, tmp + j * width);
+    }
+
+    for (int i = 0; i < width; i++) {
+        complex double col_in[height], col_out[height];
+        for (int j = 0; j < height; j++) {
+            col_in[j] = tmp[j * width + i];
+        }
+
+        ifft_dit(col_in, height, col_out);
+
+        for (int j = 0; j < height; j++) {
+            x_out[j * width + i] = col_out[j];
+        }
+    }
+
+    free(tmp);
 }
