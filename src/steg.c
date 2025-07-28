@@ -182,13 +182,12 @@ static void steg__centralize(complex double *x, size_t width, size_t height,
     }
 }
 
-STEGDEF Steg_Result steg_hide_fft(uint8_t *bytes, size_t width, size_t height,
-                                  const uint8_t *payload, size_t payload_width,
-                                  size_t payload_height) {
+STEGDEF Steg_Result steg_hide_fft(uint8_t *bytes, size_t width, size_t height, size_t num_chan,
+                                  const uint8_t *payload, size_t payload_width, size_t payload_height, size_t payload_chan) {
     // Params
     size_t margin_y = 1, margin_x = 1;
 
-    complex double *fft_r = NULL;
+    complex double *fft_c = NULL;
     complex double *tmp = NULL;
     double *y = NULL;
 
@@ -203,76 +202,83 @@ STEGDEF Steg_Result steg_hide_fft(uint8_t *bytes, size_t width, size_t height,
         steg__g_failure_reason = "Payload dimensions are too large for the cover image";
         return_defer(STEG_ERR);
     }
-
-    // Normalize the image to [0, 1] range
-    fft_r = AIDS_REALLOC(NULL, sizeof(complex double) * width * height);
-    if (fft_r == NULL) {
-        steg__g_failure_reason = aids_failure_reason();
+    if (payload_chan > num_chan) {
+        steg__g_failure_reason = "Payload channel count exceeds cover image channel count";
         return_defer(STEG_ERR);
     }
-    for (size_t i = 0; i < width * height; i++) {
-        fft_r[i] = (double)bytes[i * 3 + 0] / 255.0 + 0.0*I;
-    }
 
-    // Perform FFT on the image data
-    tmp = AIDS_REALLOC(NULL, sizeof(complex double) * width * height);
-    if (tmp == NULL) {
-        steg__g_failure_reason = aids_failure_reason();
-        return_defer(STEG_ERR);
-    }
-    fft2d(fft_r, width, height, tmp);
-    memcpy(fft_r, tmp, sizeof(complex double) * width * height);
-    AIDS_FREE(tmp); tmp = NULL;
-
-    // Compute the alpha value for scaling
-    y = AIDS_REALLOC(NULL, sizeof(double) * width * height);
-    if (y == NULL) {
-        steg__g_failure_reason = aids_failure_reason();
-        return_defer(STEG_ERR);
-    }
-    double low, high;
-    steg__centralize(fft_r, width, height, y, &low, &high);
-    AIDS_FREE(y); y = NULL;
-    double alpha = high - low;
-
-    for (size_t row = 0; row < payload_height; row++) {
-        bool yes = true;
-        for (size_t col = 0; col < payload_width; col++) {
-            size_t index = row * payload_width + col;
-
-            // Normalize the payload value to [0, 1] range
-            double payload_value = (double)payload[index] / 255.0;
-
-            size_t t_row = margin_y + row;
-            size_t t_col = margin_x + col;
-            size_t t_col_mirror = width - 1 - t_col;
-
-            // Insert the payload value into the FFT coefficients
-            fft_r[t_row * width + t_col] += payload_value * alpha;
-            fft_r[t_row * width + t_col_mirror] += payload_value * alpha;
+    for (size_t c = 0; c < num_chan; c++) {
+        // Normalize the image to [0, 1] range
+        fft_c = AIDS_REALLOC(NULL, sizeof(complex double) * width * height);
+        if (fft_c == NULL) {
+            steg__g_failure_reason = aids_failure_reason();
+            return_defer(STEG_ERR);
+        }
+        for (size_t i = 0; i < width * height; i++) {
+            fft_c[i] = (double)bytes[i * num_chan + c] / 255.0 + 0.0*I;
         }
 
-        if (!yes) break;
-    }
+        // Perform FFT on the image data
+        tmp = AIDS_REALLOC(NULL, sizeof(complex double) * width * height);
+        if (tmp == NULL) {
+            steg__g_failure_reason = aids_failure_reason();
+            return_defer(STEG_ERR);
+        }
+        fft2d(fft_c, width, height, tmp);
+        memcpy(fft_c, tmp, sizeof(complex double) * width * height);
+        AIDS_FREE(tmp); tmp = NULL;
 
-    // Perform inverse FFT to get the modified image data
-    tmp = AIDS_REALLOC(NULL, sizeof(complex double) * width * height);
-    if (tmp == NULL) {
-        steg__g_failure_reason = aids_failure_reason();
-        return_defer(STEG_ERR);
-    }
-    ifft2d(fft_r, width, height, tmp);
-    memcpy(fft_r, tmp, sizeof(complex double) * width * height);
-    AIDS_FREE(tmp); tmp = NULL;
+        // Compute the alpha value for scaling
+        y = AIDS_REALLOC(NULL, sizeof(double) * width * height);
+        if (y == NULL) {
+            steg__g_failure_reason = aids_failure_reason();
+            return_defer(STEG_ERR);
+        }
+        double low, high;
+        steg__centralize(fft_c, width, height, y, &low, &high);
+        AIDS_FREE(y); y = NULL;
+        double alpha = high - low;
 
-    // Normalize the modified image data back to [0, 255] range
-    for (size_t i = 0; i < width * height; i++) {
-        bytes[i * 3 + 0] = fmin(fmax(creal(fft_r[i]) * 255.0, 0), 255);
+        for (size_t row = 0; row < payload_height; row++) {
+            for (size_t col = 0; col < payload_width; col++) {
+                size_t index = row * payload_width + col;
+
+                // Normalize the payload value to [0, 1] range
+                double payload_value = (double)payload[index * payload_chan + 0] / 255.0;
+
+                size_t t_row = margin_y + row;
+                size_t t_col = margin_x + col;
+                size_t t_col_mirror = width - 1 - t_col;
+
+                // Insert the payload value into the FFT coefficients
+                fft_c[t_row * width + t_col] += payload_value * alpha;
+                fft_c[t_row * width + t_col_mirror] += payload_value * alpha;
+            }
+        }
+
+        // Perform inverse FFT to get the modified image data
+        tmp = AIDS_REALLOC(NULL, sizeof(complex double) * width * height);
+        if (tmp == NULL) {
+            steg__g_failure_reason = aids_failure_reason();
+            return_defer(STEG_ERR);
+        }
+        ifft2d(fft_c, width, height, tmp);
+        memcpy(fft_c, tmp, sizeof(complex double) * width * height);
+        AIDS_FREE(tmp); tmp = NULL;
+
+        // Normalize the modified image data back to [0, 255] range
+        for (size_t i = 0; i < width * height; i++) {
+            bytes[i * 3 + c] = fmin(fmax(creal(fft_c[i]) * 255.0, 0), 255);
+        }
+
+        AIDS_FREE(fft_c); fft_c = NULL;
+        AIDS_FREE(tmp); tmp = NULL;
+        AIDS_FREE(y); y = NULL;
     }
 
 defer:
-    if (fft_r == NULL) {
-        AIDS_FREE(fft_r);
+    if (fft_c != NULL) {
+        AIDS_FREE(fft_c);
     }
     if (tmp != NULL) {
         AIDS_FREE(tmp);
@@ -285,9 +291,9 @@ defer:
 }
 
 STEGDEF Steg_Result steg_show_fft(const uint8_t *og_bytes, const uint8_t *bytes,
-                                  size_t width, size_t height, uint8_t **message) {
-    complex double *fft_r = NULL;
-    complex double *fft_ogr = NULL;
+                                  size_t width, size_t height, size_t num_chan, uint8_t **message) {
+    complex double *fft_c = NULL;
+    complex double *fft_ogc = NULL;
     complex double *tmp = NULL;
     double *y = NULL;
 
@@ -299,70 +305,77 @@ STEGDEF Steg_Result steg_show_fft(const uint8_t *og_bytes, const uint8_t *bytes,
         return_defer(STEG_ERR);
     }
 
-    // Normalize the modified image and the original image to [0, 1] range
-    fft_r = AIDS_REALLOC(NULL, sizeof(complex double) * width * height);
-    if (fft_r == NULL) {
-        steg__g_failure_reason = aids_failure_reason();
-        return_defer(STEG_ERR);
-    }
-    fft_ogr = AIDS_REALLOC(NULL, sizeof(complex double) * width * height);
-    if (fft_ogr == NULL) {
-        steg__g_failure_reason = aids_failure_reason();
-        return_defer(STEG_ERR);
-    }
-    for (size_t i = 0; i < width * height; i++) {
-        fft_r[i] = (double)bytes[i * 3 + 0] / 255.0 + 0.0*I;
-        fft_ogr[i] = (double)og_bytes[i * 3 + 0] / 255.0 + 0.0*I;
-    }
-
-    // Perform FFT on the modified image data
-    tmp = AIDS_REALLOC(NULL, sizeof(complex double) * width * height);
-    if (tmp == NULL) {
-        steg__g_failure_reason = aids_failure_reason();
-        return_defer(STEG_ERR);
-    }
-    fft2d(fft_r, width, height, tmp);
-    memcpy(fft_r, tmp, sizeof(complex double) * width * height);
-    AIDS_FREE(tmp); tmp = NULL;
-
-    // Perform FFT on the original image data
-    tmp = AIDS_REALLOC(NULL, sizeof(complex double) * width * height);
-    if (tmp == NULL) {
-        steg__g_failure_reason = aids_failure_reason();
-        return_defer(STEG_ERR);
-    }
-    fft2d(fft_ogr, width, height, tmp);
-    memcpy(fft_ogr, tmp, sizeof(complex double) * width * height);
-    AIDS_FREE(tmp); tmp = NULL;
-
-    // Get the difference between the FFT coefficients of the modified image and the original image
-    for (size_t i = 0; i < width * height; i++) {
-        fft_r[i] = fft_r[i] - fft_ogr[i];
-    }
-
-    *message = AIDS_REALLOC(NULL, (width * height) * sizeof(unsigned char));
+    *message = AIDS_REALLOC(NULL, (width * height * num_chan) * sizeof(unsigned char));
     if (*message == NULL) {
         steg__g_failure_reason = aids_failure_reason();
         return_defer(STEG_ERR);
     }
-    memset(*message, 0, (width * height) * sizeof(unsigned char));
+    memset(*message, 0, (width * height * num_chan) * sizeof(unsigned char));
 
-    // Centralize the FFT coefficients to [0, 1] range and extract the payload
-    double low, high;
-    y = AIDS_REALLOC(NULL, sizeof(double) * width * height);
-    steg__centralize(fft_r, width, height, y, &low, &high);
-    for (size_t i = 0; i < width * height; i++) {
-        unsigned char payload_byte = (unsigned char)fmin(fmax(y[i] * 255.0, 0), 255);
-        (*message)[i] = payload_byte;
+    for (size_t c = 0; c < num_chan; c++) {
+        // Normalize the modified image and the original image to [0, 1] range
+        fft_c = AIDS_REALLOC(NULL, sizeof(complex double) * width * height);
+        if (fft_c == NULL) {
+            steg__g_failure_reason = aids_failure_reason();
+            return_defer(STEG_ERR);
+        }
+        fft_ogc = AIDS_REALLOC(NULL, sizeof(complex double) * width * height);
+        if (fft_ogc == NULL) {
+            steg__g_failure_reason = aids_failure_reason();
+            return_defer(STEG_ERR);
+        }
+        for (size_t i = 0; i < width * height; i++) {
+            fft_c[i] = (double)bytes[i * num_chan + c] / 255.0 + 0.0*I;
+            fft_ogc[i] = (double)og_bytes[i * num_chan + c] / 255.0 + 0.0*I;
+        }
+
+        // Perform FFT on the modified image data
+        tmp = AIDS_REALLOC(NULL, sizeof(complex double) * width * height);
+        if (tmp == NULL) {
+            steg__g_failure_reason = aids_failure_reason();
+            return_defer(STEG_ERR);
+        }
+        fft2d(fft_c, width, height, tmp);
+        memcpy(fft_c, tmp, sizeof(complex double) * width * height);
+        AIDS_FREE(tmp); tmp = NULL;
+
+        // Perform FFT on the original image data
+        tmp = AIDS_REALLOC(NULL, sizeof(complex double) * width * height);
+        if (tmp == NULL) {
+            steg__g_failure_reason = aids_failure_reason();
+            return_defer(STEG_ERR);
+        }
+        fft2d(fft_ogc, width, height, tmp);
+        memcpy(fft_ogc, tmp, sizeof(complex double) * width * height);
+        AIDS_FREE(tmp); tmp = NULL;
+
+        // Get the difference between the FFT coefficients of the modified image and the original image
+        for (size_t i = 0; i < width * height; i++) {
+            fft_c[i] = fft_c[i] - fft_ogc[i];
+        }
+
+        // Centralize the FFT coefficients to [0, 1] range and extract the payload
+        double low, high;
+        y = AIDS_REALLOC(NULL, sizeof(double) * width * height);
+        steg__centralize(fft_c, width, height, y, &low, &high);
+        for (size_t i = 0; i < width * height; i++) {
+            unsigned char payload_byte = (unsigned char)fmin(fmax(y[i] * 255.0, 0), 255);
+            (*message)[i * num_chan + c] = payload_byte;
+        }
+        AIDS_FREE(y); y = NULL;
+
+        AIDS_FREE(fft_c); fft_c = NULL;
+        AIDS_FREE(fft_ogc); fft_ogc = NULL;
+        AIDS_FREE(tmp); tmp = NULL;
+        AIDS_FREE(y); y = NULL;
     }
-    AIDS_FREE(y); y = NULL;
 
 defer:
-    if (fft_r != NULL) {
-        AIDS_FREE(fft_r);
+    if (fft_c != NULL) {
+        AIDS_FREE(fft_c);
     }
-    if (fft_ogr != NULL) {
-        AIDS_FREE(fft_ogr);
+    if (fft_ogc != NULL) {
+        AIDS_FREE(fft_ogc);
     }
     if (tmp != NULL) {
         AIDS_FREE(tmp);

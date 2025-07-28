@@ -211,7 +211,6 @@ typedef struct {
     const char *image_path;  // Path to the image file
     const char *output_path; // Path to save the modified image
     const char *payload_path; // Path to the payload file (default: stdin)
-    const char *pimage_path; // Path to the payload image file (either this or payload_path must be provided)
 } Steg_Hide_Args_Fft;
 
 static int command_hide_fft(int argc, char **argv) {
@@ -240,13 +239,6 @@ static int command_hide_fft(int argc, char **argv) {
                                     .type = ARGUMENT_TYPE_VALUE,
                                     .required = false});
 
-    argparse_add_argument(
-        &parser, (Argparse_Options){.short_name = 'P',
-                                    .long_name = "payload-image",
-                                    .description = "Path to the payload image file (either this or payload must be provided)",
-                                    .type = ARGUMENT_TYPE_VALUE,
-                                    .required = false});
-
     if (argparse_parse(&parser, argc, argv) != ARG_OK) {
         argparse_print_help(&parser);
         return AIDS_ERR;
@@ -255,7 +247,6 @@ static int command_hide_fft(int argc, char **argv) {
     args.image_path = argparse_get_value(&parser, "image");
     args.output_path = argparse_get_value_or_default(&parser, "output", NULL);
     args.payload_path = argparse_get_value_or_default(&parser, "payload", NULL);
-    args.pimage_path = argparse_get_value_or_default(&parser, "payload-image", NULL);
 
     argparse_parser_free(&parser);
 
@@ -267,10 +258,10 @@ static int command_hide_fft(int argc, char **argv) {
     }
 
     const uint8_t *payload = NULL;
-    size_t payload_width = 0, payload_height = 0;
-    if (args.pimage_path != NULL) {
+    size_t payload_width = 0, payload_height = 0, payload_chan = 0;
+    if (args.payload_path != NULL) {
         int width, height, num_chan;
-        uint8_t *pimage_bytes = stbi_load(args.pimage_path, &width, &height, &num_chan, 1);
+        uint8_t *pimage_bytes = stbi_load(args.payload_path, &width, &height, &num_chan, 0);
         if (pimage_bytes == NULL) {
             aids_log(AIDS_ERROR, "Error loading payload image: %s", stbi_failure_reason());
             exit(EXIT_FAILURE);
@@ -279,20 +270,12 @@ static int command_hide_fft(int argc, char **argv) {
         payload = pimage_bytes;
         payload_width = width;
         payload_height = height;
+        payload_chan = num_chan;
     } else {
-        // TODO: how to handle non image payloads?
-        Aids_String_Slice payload_slice = {0};
-        if (aids_io_read(args.payload_path, &payload_slice, "rb") != AIDS_OK) {
-            aids_log(AIDS_ERROR, "Error reading payload file: %s", aids_failure_reason());
-            exit(EXIT_FAILURE);
-        }
-
-        payload = (const uint8_t *)payload_slice.str;
-        payload_width = 1;
-        payload_height = payload_slice.len;
+        AIDS_TODO("Reading payload from stdin is not implemented for FFT hiding");
     }
 
-    if (steg_hide_fft(bytes, width, height, (const uint8_t *)payload, payload_width, payload_height) != STEG_OK) {
+    if (steg_hide_fft(bytes, width, height, num_chan, (const uint8_t *)payload, payload_width, payload_height, payload_chan) != STEG_OK) {
         aids_log(AIDS_ERROR, "Error hiding message in image: %s", steg_failure_reason());
         exit(EXIT_FAILURE);
     }
@@ -306,6 +289,14 @@ static int command_hide_fft(int argc, char **argv) {
 
     if (bytes != NULL) {
         stbi_image_free(bytes);
+    }
+
+    if (payload != NULL) {
+        if (args.payload_path != NULL) {
+            stbi_image_free((void *)payload);
+        } else {
+            AIDS_FREE((void *)payload);
+        }
     }
 
     return 0;
@@ -370,7 +361,7 @@ static int command_show_fft(int argc, char **argv) {
     }
     AIDS_ASSERT(og_width == width && og_height == height, "Original image dimensions do not match the modified image dimensions");
 
-    if (steg_show_fft(og_bytes, bytes, width, height, &message) != STEG_OK) {
+    if (steg_show_fft(og_bytes, bytes, width, height, num_chan, &message) != STEG_OK) {
         aids_log(AIDS_ERROR, "Error showing message from image: %s", steg_failure_reason());
         exit(EXIT_FAILURE);
     }
@@ -388,22 +379,15 @@ static int command_show_fft(int argc, char **argv) {
                 printf("Hidden message: %.*s\n", (int)message_length, message);
             }
         } else {
-            // Aids_String_Slice message_slice = {
-            //     .str = (unsigned char *)message,
-            //     .len = message_length
-            // };
-            // if (aids_io_write(args.output_path, &message_slice, "wb") != AIDS_OK) {
-            //     aids_log(AIDS_ERROR, "Error writing message to output file: %s", aids_failure_reason());
-            //     exit(EXIT_FAILURE);
-            // }
-            // aids_log(AIDS_INFO, "Hidden message written to %s", args.output_path);
-
-            stbi_write_png(args.output_path, width, height, 1, message, width * 1);
+            stbi_write_png(args.output_path, width, height, num_chan, message, width * num_chan);
         }
     } else {
         printf("No hidden message found in the image.\n");
     }
 
+    if (og_bytes != NULL) {
+        stbi_image_free(og_bytes);
+    }
     if (bytes != NULL) {
         stbi_image_free(bytes);
     }

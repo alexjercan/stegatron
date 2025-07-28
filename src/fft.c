@@ -5,7 +5,7 @@
 
 #include "fft.h"
 
-void fft_simple(complex double *x, unsigned long n, complex double *x_out) {
+void fft_simple(const complex double *x, unsigned long n, complex double *x_out) {
     for (size_t k = 0; k < n; k++) {
         x_out[k] = 0.0 + 0.0 * I;
         for (size_t m = 0; m < n; m++) {
@@ -15,7 +15,7 @@ void fft_simple(complex double *x, unsigned long n, complex double *x_out) {
     }
 }
 
-void ifft_simple(complex double *x, unsigned long n, complex double *x_out) {
+void ifft_simple(const complex double *x, unsigned long n, complex double *x_out) {
     for (size_t k = 0; k < n; k++) {
         x_out[k] = 0.0 + 0.0 * I;
         for (size_t m = 0; m < n; m++) {
@@ -26,7 +26,7 @@ void ifft_simple(complex double *x, unsigned long n, complex double *x_out) {
     }
 }
 
-static void fft__dit_internal(complex double *x, unsigned long n, complex double *x_out) {
+static void fft__dit_internal(const complex double *x, unsigned long n, complex double *x_out) {
     if (n == 1) {
         x_out[0] = x[0];
         return;
@@ -58,12 +58,12 @@ static void fft__dit_internal(complex double *x, unsigned long n, complex double
     free(fft_odd);
 }
 
-void fft_dit(complex double *x, unsigned long n, complex double *x_out) {
+void fft_dit(const complex double *x, unsigned long n, complex double *x_out) {
     assert((n & (n - 1)) == 0 && "n must be a power of 2");
     fft__dit_internal(x, n, x_out);
 }
 
-static void ifft__dit_recursive(complex double *x, unsigned long n, complex double *x_out) {
+static void ifft__dit_recursive(const complex double *x, unsigned long n, complex double *x_out) {
     if (n == 1) {
         x_out[0] = x[0];
         return;
@@ -96,7 +96,7 @@ static void ifft__dit_recursive(complex double *x, unsigned long n, complex doub
     free(ifft_odd);
 }
 
-void ifft_dit(complex double *x, unsigned long n, complex double *x_out) {
+void ifft_dit(const complex double *x, unsigned long n, complex double *x_out) {
     assert((n & (n - 1)) == 0 && "n must be a power of 2");
 
     ifft__dit_recursive(x, n, x_out);
@@ -106,7 +106,7 @@ void ifft_dit(complex double *x, unsigned long n, complex double *x_out) {
     }
 }
 
-void fft2d(complex double *x, unsigned long width, unsigned long height, complex double *x_out) {
+void fft2d(const complex double *x, unsigned long width, unsigned long height, complex double *x_out) {
     assert((width & (width - 1)) == 0 && "width must be a power of 2");
     assert((height & (height - 1)) == 0 && "height must be a power of 2");
 
@@ -132,7 +132,7 @@ void fft2d(complex double *x, unsigned long width, unsigned long height, complex
     free(tmp);
 }
 
-void ifft2d(complex double *x, unsigned long width, unsigned long height, complex double *x_out) {
+void ifft2d(const complex double *x, unsigned long width, unsigned long height, complex double *x_out) {
     assert((width & (width - 1)) == 0 && "width must be a power of 2");
     assert((height & (height - 1)) == 0 && "height must be a power of 2");
 
@@ -156,119 +156,4 @@ void ifft2d(complex double *x, unsigned long width, unsigned long height, comple
     }
 
     free(tmp);
-}
-
-/* Copied from https://github.com/jtfell/c-fft */
-void dft_naive(const complex double *x, size_t N, complex double *X) {
-    for(size_t k = 0; k < N; k++) {
-        X[k] = 0.0 + 0.0 * I;
-        for(size_t n = 0; n < N; n++) {
-            X[k] = X[k] + x[n] * cexp(-2.0 * I * M_PI * n * k / N);
-        }
-    }
-}
-
-void idft_naive(const complex double *X, size_t N, complex double *x) {
-    for(size_t n = 0; n < N; n++) {
-        x[n] = 0.0 + 0.0 * I;
-        for(size_t k = 0; k < N; k++) {
-            x[n] = x[n] + X[k] * cexp(2.0 * I * M_PI * n * k / N);
-        }
-        x[n] /= N; // Normalize the inverse DFT
-    }
-}
-
-/* Copied from https://github.com/jtfell/c-fft */
-void fft_CooleyTukey(const complex double *x, size_t width, size_t height, complex double *X) {
-    complex double** columns = malloc(sizeof(complex double*) * width);
-    for(size_t k1 = 0; k1 < width; k1++) {
-        columns[k1] = malloc(sizeof(complex double) * height);
-    }
-
-    complex double** rows = malloc(sizeof(complex double*) * height);
-    for(size_t k2 = 0; k2 < height; k2++) {
-        rows[k2] = malloc(sizeof(complex double) * width);
-    }
-
-    for (size_t k1 = 0; k1 < width; k1++) {
-        for(size_t k2 = 0; k2 < height; k2++) {
-            columns[k1][k2] = x[k2 * width + k1];
-        }
-    }
-
-    for (size_t k1 = 0; k1 < width; k1++) {
-        dft_naive(columns[k1], height, columns[k1]);
-    }
-
-    for(size_t k1 = 0; k1 < width; k1++) {
-        for (size_t k2 = 0; k2 < height; k2++) {
-            rows[k2][k1] = columns[k1][k2];
-        }
-    }
-
-    for (size_t k2 = 0; k2 < height; k2++) {
-        dft_naive(rows[k2], width, rows[k2]);
-    }
-
-    for(size_t k1 = 0; k1 < width; k1++) {
-        for (size_t k2 = 0; k2 < height; k2++) {
-            X[k1 * height + k2] = rows[k2][k1];
-        }
-    }
-
-    for(size_t k1 = 0; k1 < width; k1++) {
-        free(columns[k1]);
-    }
-    for(size_t k2 = 0; k2 < height; k2++) {
-        free(rows[k2]);
-    }
-    free(columns);
-    free(rows);
-}
-
-void ifft_CooleyTukey(const complex double *X, size_t width, size_t height, complex double *x) {
-    complex double** columns = malloc(sizeof(complex double*) * width);
-    for(size_t k1 = 0; k1 < width; k1++) {
-        columns[k1] = malloc(sizeof(complex double) * height);
-    }
-
-    complex double** rows = malloc(sizeof(complex double*) * height);
-    for(size_t k2 = 0; k2 < height; k2++) {
-        rows[k2] = malloc(sizeof(complex double) * width);
-    }
-
-    for (size_t k1 = 0; k1 < width; k1++) {
-        for(size_t k2 = 0; k2 < height; k2++) {
-            columns[k1][k2] = X[k2 * width + k1];
-        }
-    }
-
-    for (size_t k1 = 0; k1 < width; k1++) {
-        idft_naive(columns[k1], height, columns[k1]);
-    }
-
-    for(size_t k1 = 0; k1 < width; k1++) {
-        for (size_t k2 = 0; k2 < height; k2++) {
-            rows[k2][k1] = columns[k1][k2];
-        }
-    }
-
-    for (size_t k2 = 0; k2 < height; k2++) {
-        idft_naive(rows[k2], width, rows[k2]);
-    }
-
-    for(size_t k1 = 0; k1 < width; k1++) {
-        for (size_t k2 = 0; k2 < height; k2++) {
-            x[k1 * height + k2] = rows[k2][k1];
-        }
-    }
-
-    for(size_t k1 = 0; k1 < width; k1++) {
-        free(columns[k1]);
-    }
-    for(size_t k2 = 0; k2 < height; k2++) {
-        free(rows[k2]);
-    }
-    free(columns);
-    free(rows);
 }

@@ -24,11 +24,10 @@ STEGDEF Steg_Result steg_show_lsb(const uint8_t *bytes, size_t bytes_length,
                                   uint8_t **message, size_t *message_length,
                                   int compression);
 
-STEGDEF Steg_Result steg_hide_fft(uint8_t *bytes, size_t width, size_t height,
-                                  const uint8_t *payload, size_t payload_width,
-                                  size_t payload_height);
+STEGDEF Steg_Result steg_hide_fft(uint8_t *bytes, size_t width, size_t height, size_t num_chan,
+                                  const uint8_t *payload, size_t payload_width, size_t payload_height, size_t payload_chan);
 STEGDEF Steg_Result steg_show_fft(const uint8_t *og_bytes, const uint8_t *bytes,
-                                  size_t width, size_t height, uint8_t **message);
+                                  size_t width, size_t height, size_t num_chan, uint8_t **message);
 
 STEGDEF const char *steg_failure_reason(void);
 
