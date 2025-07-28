@@ -267,7 +267,7 @@ static int command_hide_fft(int argc, char **argv) {
     }
 
     const uint8_t *payload = NULL;
-    size_t payload_length = 0;
+    size_t payload_width = 0, payload_height = 0;
     if (args.pimage_path != NULL) {
         int width, height, num_chan;
         uint8_t *pimage_bytes = stbi_load(args.pimage_path, &width, &height, &num_chan, 1);
@@ -277,8 +277,10 @@ static int command_hide_fft(int argc, char **argv) {
         }
 
         payload = pimage_bytes;
-        payload_length = width * height * 1;
+        payload_width = width;
+        payload_height = height;
     } else {
+        // TODO: how to handle non image payloads?
         Aids_String_Slice payload_slice = {0};
         if (aids_io_read(args.payload_path, &payload_slice, "rb") != AIDS_OK) {
             aids_log(AIDS_ERROR, "Error reading payload file: %s", aids_failure_reason());
@@ -286,10 +288,11 @@ static int command_hide_fft(int argc, char **argv) {
         }
 
         payload = (const uint8_t *)payload_slice.str;
-        payload_length = payload_slice.len;
+        payload_width = 1;
+        payload_height = payload_slice.len;
     }
 
-    if (steg_hide_fft(bytes, width, height, (const uint8_t *)payload, payload_length) != STEG_OK) {
+    if (steg_hide_fft(bytes, width, height, (const uint8_t *)payload, payload_width, payload_height) != STEG_OK) {
         aids_log(AIDS_ERROR, "Error hiding message in image: %s", steg_failure_reason());
         exit(EXIT_FAILURE);
     }
@@ -367,11 +370,11 @@ static int command_show_fft(int argc, char **argv) {
     }
     AIDS_ASSERT(og_width == width && og_height == height, "Original image dimensions do not match the modified image dimensions");
 
-    size_t message_length = 0;
-    if (steg_show_fft(og_bytes, bytes, width, height, &message, &message_length) != STEG_OK) {
+    if (steg_show_fft(og_bytes, bytes, width, height, &message) != STEG_OK) {
         aids_log(AIDS_ERROR, "Error showing message from image: %s", steg_failure_reason());
         exit(EXIT_FAILURE);
     }
+    size_t message_length = width * height;
 
     if (message_length > 0) {
         if (args.output_path == NULL) {

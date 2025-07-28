@@ -36,6 +36,16 @@
         nativeBuildInputs = with pkgs; [
           clang
           valgrind
+          python3
+        ];
+
+        packages = with pkgs; [
+          (python3.withPackages (python-pkgs:
+            with python-pkgs; [
+              numpy
+              pillow
+              matplotlib
+            ]))
         ];
 
         buildInputs = [];

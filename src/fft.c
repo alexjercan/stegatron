@@ -202,7 +202,7 @@ void fft_CooleyTukey(const complex double *x, size_t width, size_t height, compl
 
     for(size_t k1 = 0; k1 < width; k1++) {
         for (size_t k2 = 0; k2 < height; k2++) {
-            rows[k2][k1] = columns[k1][k2] * cexp(-2.0 * I * M_PI * k1 * k2 / (width * height));
+            rows[k2][k1] = columns[k1][k2];
         }
     }
 
@@ -249,7 +249,7 @@ void ifft_CooleyTukey(const complex double *X, size_t width, size_t height, comp
 
     for(size_t k1 = 0; k1 < width; k1++) {
         for (size_t k2 = 0; k2 < height; k2++) {
-            rows[k2][k1] = columns[k1][k2] * cexp(2.0 * I * M_PI * k1 * k2 / (width * height));
+            rows[k2][k1] = columns[k1][k2];
         }
     }
 

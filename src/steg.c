@@ -111,90 +111,161 @@ defer:
     return result;
 }
 
-#define ALPHA 0.1f // Adjust alpha as needed
+/* Copied from https://github.com/MidoriYakumo/FdSig/tree/master */
+static void steg__centralize(complex double *x, size_t width, size_t height,
+                             double *y, double *low, double *high) {
+    size_t n = width * height;
+    for (size_t i = 0; i < n; i++) {
+        y[i] = creal(x[i]);
+    }
+
+    double min_val = y[0];
+    double max_val = y[0];
+    for (size_t i = 1; i < n; i++) {
+        if (y[i] < min_val) {
+            min_val = y[i];
+        }
+        if (y[i] > max_val) {
+            max_val = y[i];
+        }
+    }
+
+    size_t threshold = (size_t)((double)n * 0.06);
+    double l = min_val;
+    double r = max_val;
+    while (l + 1 <= r) {
+        double m = (l + r) / 2.0;
+        size_t count = 0;
+        for (size_t i = 0; i < n; i++) {
+            if (y[i] < m) {
+                count++;
+            }
+        }
+
+        if (count < threshold) {
+            l = m;
+        } else {
+            r = m;
+        }
+    }
+    *low = l;
+
+    l = min_val;
+    r = max_val;
+    while (l + 1 <= r) {
+        double m = (l + r) / 2.0;
+        size_t count = 0;
+        for (size_t i = 0; i < n; i++) {
+            if (y[i] > m) {
+                count++;
+            }
+        }
+
+        if (count < threshold) {
+            r = m;
+        } else {
+            l = m;
+        }
+    }
+    *high = r;
+    if (*low + 1 >= *high) {
+        *high = *low + 1;
+    }
+
+    for (size_t i = 0; i < n; i++) {
+        y[i] = (y[i] - *low) / (*high - *low);
+        if (y[i] < 0.0) {
+            y[i] = 0.0;
+        } else if (y[i] > 1.0) {
+            y[i] = 1.0;
+        }
+    }
+}
 
 STEGDEF Steg_Result steg_hide_fft(uint8_t *bytes, size_t width, size_t height,
-                                  const uint8_t *payload, size_t payload_length) {
+                                  const uint8_t *payload, size_t payload_width,
+                                  size_t payload_height) {
+    // Params
+    size_t margin_y = 1, margin_x = 1;
+
     complex double *fft_r = NULL;
     complex double *tmp = NULL;
+    double *y = NULL;
 
     Steg_Result result = STEG_OK;
 
+    // Validate input dimensions
     if ((width & (width - 1)) != 0 || (height & (height - 1)) != 0) {
         steg__g_failure_reason = "The input data is not a power of 2 shape.";
         return_defer(STEG_ERR);
     }
-
-    size_t margin_y = 1, margin_x = 1;
-    float alpha = ALPHA;
-
-    size_t payload_width = (width - 2 * margin_x) / 2;
-    size_t payload_height = height - 2 * margin_y;
-
-    if (payload_length > payload_width * payload_height) {
-        steg__g_failure_reason = "Payload is too large for the cover image";
+    if (payload_width > width / 2 - 2 * margin_x || payload_height > height / 2 - 2 * margin_y) {
+        steg__g_failure_reason = "Payload dimensions are too large for the cover image";
         return_defer(STEG_ERR);
     }
 
+    // Normalize the image to [0, 1] range
     fft_r = AIDS_REALLOC(NULL, sizeof(complex double) * width * height);
     if (fft_r == NULL) {
         steg__g_failure_reason = aids_failure_reason();
         return_defer(STEG_ERR);
     }
-
     for (size_t i = 0; i < width * height; i++) {
         fft_r[i] = (double)bytes[i * 3 + 0] / 255.0 + 0.0*I;
     }
 
+    // Perform FFT on the image data
     tmp = AIDS_REALLOC(NULL, sizeof(complex double) * width * height);
     if (tmp == NULL) {
         steg__g_failure_reason = aids_failure_reason();
         return_defer(STEG_ERR);
     }
     fft2d(fft_r, width, height, tmp);
-    // fft_CooleyTukey(fft_r, width, height, tmp);
-    for (size_t i = 0; i < width * height; i++) {
-        fft_r[i] = tmp[i];
-    }
+    memcpy(fft_r, tmp, sizeof(complex double) * width * height);
     AIDS_FREE(tmp); tmp = NULL;
 
-    for (size_t y = 0; y < payload_height; y++) {
+    // Compute the alpha value for scaling
+    y = AIDS_REALLOC(NULL, sizeof(double) * width * height);
+    if (y == NULL) {
+        steg__g_failure_reason = aids_failure_reason();
+        return_defer(STEG_ERR);
+    }
+    double low, high;
+    steg__centralize(fft_r, width, height, y, &low, &high);
+    AIDS_FREE(y); y = NULL;
+    double alpha = high - low;
+
+    for (size_t row = 0; row < payload_height; row++) {
         bool yes = true;
+        for (size_t col = 0; col < payload_width; col++) {
+            size_t index = row * payload_width + col;
 
-        for (size_t x = 0; x < payload_width; x++) {
-            size_t index = y * payload_width + x;
-            if (index >= payload_length) {
-                yes = false;
-                break;
-            }
-
+            // Normalize the payload value to [0, 1] range
             double payload_value = (double)payload[index] / 255.0;
 
-            size_t ty = margin_y + y;
-            size_t tx = margin_x + x;
-            size_t tx_mirror = width - 1 - tx;
+            size_t t_row = margin_y + row;
+            size_t t_col = margin_x + col;
+            size_t t_col_mirror = width - 1 - t_col;
 
-            fft_r[ty * width + tx] += payload_value * alpha;
-            fft_r[ty * width + tx_mirror] += payload_value * alpha;
+            // Insert the payload value into the FFT coefficients
+            fft_r[t_row * width + t_col] += payload_value * alpha;
+            fft_r[t_row * width + t_col_mirror] += payload_value * alpha;
         }
 
-        if (!yes) {
-            break;
-        }
+        if (!yes) break;
     }
 
+    // Perform inverse FFT to get the modified image data
     tmp = AIDS_REALLOC(NULL, sizeof(complex double) * width * height);
     if (tmp == NULL) {
         steg__g_failure_reason = aids_failure_reason();
         return_defer(STEG_ERR);
     }
     ifft2d(fft_r, width, height, tmp);
-    // ifft_CooleyTukey(fft_r, width, height, tmp);
-    for (size_t i = 0; i < width * height; i++) {
-        fft_r[i] = tmp[i];
-    }
+    memcpy(fft_r, tmp, sizeof(complex double) * width * height);
     AIDS_FREE(tmp); tmp = NULL;
 
+    // Normalize the modified image data back to [0, 255] range
     for (size_t i = 0; i < width * height; i++) {
         bytes[i * 3 + 0] = fmin(fmax(creal(fft_r[i]) * 255.0, 0), 255);
     }
@@ -206,103 +277,85 @@ defer:
     if (tmp != NULL) {
         AIDS_FREE(tmp);
     }
+    if (y != NULL) {
+        AIDS_FREE(y);
+    }
 
     return result;
 }
 
 STEGDEF Steg_Result steg_show_fft(const uint8_t *og_bytes, const uint8_t *bytes,
-                                  size_t width, size_t height, uint8_t **message,
-                                  size_t *message_length) {
+                                  size_t width, size_t height, uint8_t **message) {
     complex double *fft_r = NULL;
     complex double *fft_ogr = NULL;
     complex double *tmp = NULL;
+    double *y = NULL;
 
     Steg_Result result = STEG_OK;
 
+    // Validate input dimensions
     if ((width & (width - 1)) != 0 || (height & (height - 1)) != 0) {
         steg__g_failure_reason = "The input data is not a power of 2 shape.";
         return_defer(STEG_ERR);
     }
 
-    size_t margin_y = 1, margin_x = 1;
-    float alpha = ALPHA;
-
-    size_t payload_width = (width - 2 * margin_x) / 2;
-    size_t payload_height = height - 2 * margin_y;
-    size_t max_payload_length = payload_width * payload_height;
-
+    // Normalize the modified image and the original image to [0, 1] range
     fft_r = AIDS_REALLOC(NULL, sizeof(complex double) * width * height);
     if (fft_r == NULL) {
         steg__g_failure_reason = aids_failure_reason();
         return_defer(STEG_ERR);
     }
-
     fft_ogr = AIDS_REALLOC(NULL, sizeof(complex double) * width * height);
     if (fft_ogr == NULL) {
         steg__g_failure_reason = aids_failure_reason();
         return_defer(STEG_ERR);
     }
-
     for (size_t i = 0; i < width * height; i++) {
         fft_r[i] = (double)bytes[i * 3 + 0] / 255.0 + 0.0*I;
         fft_ogr[i] = (double)og_bytes[i * 3 + 0] / 255.0 + 0.0*I;
     }
 
+    // Perform FFT on the modified image data
     tmp = AIDS_REALLOC(NULL, sizeof(complex double) * width * height);
     if (tmp == NULL) {
         steg__g_failure_reason = aids_failure_reason();
         return_defer(STEG_ERR);
     }
     fft2d(fft_r, width, height, tmp);
-    // fft_CooleyTukey(fft_r, width, height, tmp);
-    for (size_t i = 0; i < width * height; i++) {
-        fft_r[i] = tmp[i];
-    }
+    memcpy(fft_r, tmp, sizeof(complex double) * width * height);
     AIDS_FREE(tmp); tmp = NULL;
 
+    // Perform FFT on the original image data
     tmp = AIDS_REALLOC(NULL, sizeof(complex double) * width * height);
     if (tmp == NULL) {
         steg__g_failure_reason = aids_failure_reason();
         return_defer(STEG_ERR);
     }
     fft2d(fft_ogr, width, height, tmp);
-    // fft_CooleyTukey(fft_ogr, width, height, tmp);
-    for (size_t i = 0; i < width * height; i++) {
-        fft_ogr[i] = tmp[i];
-    }
+    memcpy(fft_ogr, tmp, sizeof(complex double) * width * height);
     AIDS_FREE(tmp); tmp = NULL;
 
-    *message_length = 0;
-    *message = AIDS_REALLOC(NULL, (max_payload_length + 1) * sizeof(unsigned char));
+    // Get the difference between the FFT coefficients of the modified image and the original image
+    for (size_t i = 0; i < width * height; i++) {
+        fft_r[i] = fft_r[i] - fft_ogr[i];
+    }
+
+    *message = AIDS_REALLOC(NULL, (width * height) * sizeof(unsigned char));
     if (*message == NULL) {
         steg__g_failure_reason = aids_failure_reason();
         return_defer(STEG_ERR);
     }
-    memset(*message, 0, (max_payload_length + 1) * sizeof(unsigned char));
+    memset(*message, 0, (width * height) * sizeof(unsigned char));
 
-    for (size_t y = 0; y < payload_height; y++) {
-        bool yes = true;
-        for (size_t x = 0; x < payload_width; x++) {
-            size_t index = y * payload_width + x;
-            if (index >= max_payload_length) {
-                yes = false;
-                break;
-            }
-
-            size_t ty = margin_y + y;
-            size_t tx = margin_x + x;
-
-            double payload_value = creal(fft_r[ty * width + tx] - fft_ogr[ty * width + tx]) / alpha;
-            unsigned char payload_byte = (unsigned char)fmin(fmax(payload_value * 255.0, 0), 255);
-
-            (*message)[index] = payload_byte;
-            (*message_length)++;
-        }
-
-        if (!yes) {
-            break;
-        }
+    // Centralize the FFT coefficients to [0, 1] range and extract the payload
+    double low, high;
+    y = AIDS_REALLOC(NULL, sizeof(double) * width * height);
+    steg__centralize(fft_r, width, height, y, &low, &high);
+    for (size_t i = 0; i < width * height; i++) {
+        unsigned char payload_byte = (unsigned char)fmin(fmax(y[i] * 255.0, 0), 255);
+        (*message)[i] = payload_byte;
     }
+    AIDS_FREE(y); y = NULL;
 
 defer:
     if (fft_r != NULL) {
@@ -313,6 +366,9 @@ defer:
     }
     if (tmp != NULL) {
         AIDS_FREE(tmp);
+    }
+    if (y != NULL) {
+        AIDS_FREE(y);
     }
 
     return result;
