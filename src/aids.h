@@ -50,6 +50,10 @@
         fprintf(stderr, "%s:%d: UNREACHABLE: %s\n", __FILE__, __LINE__, message); \
         exit(EXIT_FAILURE);                                                    \
     } while (0)
+#define AIDS_ASSERT(condition, message)                                        \
+    do {                                                                       \
+        assert(condition && message);                                          \
+    } while (0)
 
 typedef enum {
     AIDS_INFO,

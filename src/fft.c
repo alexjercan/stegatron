@@ -112,19 +112,19 @@ void fft2d(complex double *x, unsigned long width, unsigned long height, complex
 
     complex double *tmp = malloc(sizeof(complex double) * width * height);
 
-    for (int j = 0; j < height; j++) {
+    for (size_t j = 0; j < height; j++) {
         fft_dit(x + j * width, width, tmp + j * width);
     }
 
-    for (int i = 0; i < width; i++) {
+    for (size_t i = 0; i < width; i++) {
         complex double col_in[height], col_out[height];
-        for (int j = 0; j < height; j++) {
+        for (size_t j = 0; j < height; j++) {
             col_in[j] = tmp[j * width + i];
         }
 
         fft_dit(col_in, height, col_out);
 
-        for (int j = 0; j < height; j++) {
+        for (size_t j = 0; j < height; j++) {
             x_out[j * width + i] = col_out[j];
         }
     }
@@ -138,22 +138,137 @@ void ifft2d(complex double *x, unsigned long width, unsigned long height, comple
 
     complex double *tmp = malloc(sizeof(complex double) * width * height);
 
-    for (int j = 0; j < height; j++) {
+    for (size_t j = 0; j < height; j++) {
         ifft_dit(x + j * width, width, tmp + j * width);
     }
 
-    for (int i = 0; i < width; i++) {
+    for (size_t i = 0; i < width; i++) {
         complex double col_in[height], col_out[height];
-        for (int j = 0; j < height; j++) {
+        for (size_t j = 0; j < height; j++) {
             col_in[j] = tmp[j * width + i];
         }
 
         ifft_dit(col_in, height, col_out);
 
-        for (int j = 0; j < height; j++) {
+        for (size_t j = 0; j < height; j++) {
             x_out[j * width + i] = col_out[j];
         }
     }
 
     free(tmp);
+}
+
+/* Copied from https://github.com/jtfell/c-fft */
+void dft_naive(const complex double *x, size_t N, complex double *X) {
+    for(size_t k = 0; k < N; k++) {
+        X[k] = 0.0 + 0.0 * I;
+        for(size_t n = 0; n < N; n++) {
+            X[k] = X[k] + x[n] * cexp(-2.0 * I * M_PI * n * k / N);
+        }
+    }
+}
+
+void idft_naive(const complex double *X, size_t N, complex double *x) {
+    for(size_t n = 0; n < N; n++) {
+        x[n] = 0.0 + 0.0 * I;
+        for(size_t k = 0; k < N; k++) {
+            x[n] = x[n] + X[k] * cexp(2.0 * I * M_PI * n * k / N);
+        }
+        x[n] /= N; // Normalize the inverse DFT
+    }
+}
+
+/* Copied from https://github.com/jtfell/c-fft */
+void fft_CooleyTukey(const complex double *x, size_t width, size_t height, complex double *X) {
+    complex double** columns = malloc(sizeof(complex double*) * width);
+    for(size_t k1 = 0; k1 < width; k1++) {
+        columns[k1] = malloc(sizeof(complex double) * height);
+    }
+
+    complex double** rows = malloc(sizeof(complex double*) * height);
+    for(size_t k2 = 0; k2 < height; k2++) {
+        rows[k2] = malloc(sizeof(complex double) * width);
+    }
+
+    for (size_t k1 = 0; k1 < width; k1++) {
+        for(size_t k2 = 0; k2 < height; k2++) {
+            columns[k1][k2] = x[k2 * width + k1];
+        }
+    }
+
+    for (size_t k1 = 0; k1 < width; k1++) {
+        dft_naive(columns[k1], height, columns[k1]);
+    }
+
+    for(size_t k1 = 0; k1 < width; k1++) {
+        for (size_t k2 = 0; k2 < height; k2++) {
+            rows[k2][k1] = columns[k1][k2] * cexp(-2.0 * I * M_PI * k1 * k2 / (width * height));
+        }
+    }
+
+    for (size_t k2 = 0; k2 < height; k2++) {
+        dft_naive(rows[k2], width, rows[k2]);
+    }
+
+    for(size_t k1 = 0; k1 < width; k1++) {
+        for (size_t k2 = 0; k2 < height; k2++) {
+            X[k1 * height + k2] = rows[k2][k1];
+        }
+    }
+
+    for(size_t k1 = 0; k1 < width; k1++) {
+        free(columns[k1]);
+    }
+    for(size_t k2 = 0; k2 < height; k2++) {
+        free(rows[k2]);
+    }
+    free(columns);
+    free(rows);
+}
+
+void ifft_CooleyTukey(const complex double *X, size_t width, size_t height, complex double *x) {
+    complex double** columns = malloc(sizeof(complex double*) * width);
+    for(size_t k1 = 0; k1 < width; k1++) {
+        columns[k1] = malloc(sizeof(complex double) * height);
+    }
+
+    complex double** rows = malloc(sizeof(complex double*) * height);
+    for(size_t k2 = 0; k2 < height; k2++) {
+        rows[k2] = malloc(sizeof(complex double) * width);
+    }
+
+    for (size_t k1 = 0; k1 < width; k1++) {
+        for(size_t k2 = 0; k2 < height; k2++) {
+            columns[k1][k2] = X[k2 * width + k1];
+        }
+    }
+
+    for (size_t k1 = 0; k1 < width; k1++) {
+        idft_naive(columns[k1], height, columns[k1]);
+    }
+
+    for(size_t k1 = 0; k1 < width; k1++) {
+        for (size_t k2 = 0; k2 < height; k2++) {
+            rows[k2][k1] = columns[k1][k2] * cexp(2.0 * I * M_PI * k1 * k2 / (width * height));
+        }
+    }
+
+    for (size_t k2 = 0; k2 < height; k2++) {
+        idft_naive(rows[k2], width, rows[k2]);
+    }
+
+    for(size_t k1 = 0; k1 < width; k1++) {
+        for (size_t k2 = 0; k2 < height; k2++) {
+            x[k1 * height + k2] = rows[k2][k1];
+        }
+    }
+
+    for(size_t k1 = 0; k1 < width; k1++) {
+        free(columns[k1]);
+    }
+    for(size_t k2 = 0; k2 < height; k2++) {
+        free(rows[k2]);
+    }
+    free(columns);
+    free(rows);
 }
