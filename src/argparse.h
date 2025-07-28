@@ -234,7 +234,7 @@ static Argparse_Result argparse__get_option_arg(Argparse_Parser *parser, const c
         }
     }
 
-    if (arg == NULL) {
+    if (*arg == NULL) {
         fprintf(stderr, "Error: unknown argument: %s\n", name);
         return ARG_ERR;
     }
@@ -259,7 +259,7 @@ static Argparse_Result argparse__get_positional_arg(Argparse_Parser *parser, con
         }
     }
 
-    if (arg == NULL) {
+    if (*arg == NULL) {
         fprintf(stderr, "Error: no positional argument available for: %s\n", name);
         return ARG_ERR;
     }
