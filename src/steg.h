@@ -29,6 +29,11 @@ STEGDEF Steg_Result steg_hide_fft(uint8_t *bytes, size_t width, size_t height, s
 STEGDEF Steg_Result steg_show_fft(const uint8_t *og_bytes, const uint8_t *bytes,
                                   size_t width, size_t height, size_t num_chan, uint8_t **message);
 
+STEGDEF Steg_Result steg_hide_dct(uint8_t *bytes, size_t width, size_t height, size_t num_chan,
+                                  const uint8_t *payload, size_t payload_length, size_t compression);
+STEGDEF Steg_Result steg_show_dct(const uint8_t *bytes, size_t width, size_t height, size_t num_chan,
+                                  uint8_t **message, size_t *message_length, size_t compression);
+
 STEGDEF const char *steg_failure_reason(void);
 
 #endif // STEG_H

@@ -6,7 +6,7 @@
 #include <math.h>
 
 #include "aids.h"
-#include "fft.h"
+#include "signal.h"
 #include "steg.h"
 
 static const char *steg__g_failure_reason;
@@ -382,6 +382,189 @@ defer:
     }
     if (y != NULL) {
         AIDS_FREE(y);
+    }
+
+    return result;
+}
+
+#define COEFF_X 4
+#define COEFF_Y 3
+
+static bool steg__validate_compression_dct(size_t compression) {
+    // TODO: Find some edge cases where this is not true
+    AIDS_UNUSED(compression);
+    return true;
+}
+
+static void block_from_array(const double *array, size_t stride, size_t block_x, size_t block_y, double block[BLOCK_SIZE][BLOCK_SIZE]) {
+    for (size_t i = 0; i < BLOCK_SIZE; i++) {
+        for (size_t j = 0; j < BLOCK_SIZE; j++) {
+            block[i][j] = array[(block_y * BLOCK_SIZE + i) * stride + (block_x * BLOCK_SIZE + j)];
+        }
+    }
+}
+
+static void block_to_array(const double block[BLOCK_SIZE][BLOCK_SIZE], size_t stride, size_t block_x, size_t block_y, double *array) {
+    for (size_t i = 0; i < BLOCK_SIZE; i++) {
+        for (size_t j = 0; j < BLOCK_SIZE; j++) {
+            array[(block_y * BLOCK_SIZE + i) * stride + (block_x * BLOCK_SIZE + j)] = block[i][j];
+        }
+    }
+}
+
+static void steg__hide_dct_helper(double *normalized, size_t width, size_t height, size_t num_chan,
+                                  const uint8_t *payload, size_t payload_length, size_t compression) {
+    size_t byte_index = 0;
+    size_t bit_index = 0;
+    for (size_t i = 0; i < width / BLOCK_SIZE && byte_index < payload_length; i++) {
+        for (size_t j = 0; j < height / BLOCK_SIZE && byte_index < payload_length; j++) {
+            double block[BLOCK_SIZE][BLOCK_SIZE] = {0};
+            block_from_array(normalized, width * num_chan, i, j, block);
+
+            double dct_block[BLOCK_SIZE][BLOCK_SIZE] = {0};
+            dct2d(block, dct_block);
+
+            uint8_t byte = payload[byte_index];
+            char bit = (byte >> (BYTE_SIZE - bit_index - 1)) & 0b00000001;
+
+            double coeff = dct_block[COEFF_X][COEFF_Y];
+
+            // TODO: Handle compression
+            coeff = round(coeff) - ((int)coeff % 2) + bit;
+            dct_block[COEFF_X][COEFF_Y] = coeff;
+
+            idct2d(dct_block, block);
+            block_to_array(block, width * num_chan, i, j, normalized);
+
+            bit_index += compression;
+            if (bit_index >= BYTE_SIZE) {
+                bit_index = 0;
+                byte_index++;
+            }
+        }
+    }
+}
+
+static void steg__show_dct_helper(const double *normalized, size_t width, size_t height, size_t num_chan,
+                                  uint8_t *message, size_t message_length, size_t compression) {
+    size_t bit_index = 0;
+    size_t byte_index = 0;
+    uint8_t byte = 0;
+    for (size_t i = 0; i < width / BLOCK_SIZE && byte_index < message_length; i++) {
+        for (size_t j = 0; j < height / BLOCK_SIZE && byte_index < message_length; j++) {
+            double block[BLOCK_SIZE][BLOCK_SIZE] = {0};
+            block_from_array(normalized, width * num_chan, i, j, block);
+
+            double dct_block[BLOCK_SIZE][BLOCK_SIZE] = {0};
+            dct2d(block, dct_block);
+
+            double coeff = dct_block[COEFF_X][COEFF_Y];
+            uint8_t bit = (uint8_t)((int)round(coeff) % 2) & 0b00000001;
+            byte |= (bit << (BYTE_SIZE - bit_index - 1));
+            // TODO: Handle compression
+
+            bit_index += compression;
+            if (bit_index >= BYTE_SIZE) {
+                message[byte_index] = byte;
+
+                byte_index++;
+                bit_index = 0;
+                byte = 0;
+            }
+        }
+    }
+}
+
+STEGDEF Steg_Result steg_hide_dct(uint8_t *bytes, size_t width, size_t height, size_t num_chan,
+                                  const uint8_t *payload, size_t payload_length, size_t compression) {
+    double *normalized = NULL;
+
+    Steg_Result result = STEG_OK;
+
+    if (!steg__validate_compression_dct(compression)) {
+        steg__g_failure_reason = "Invalid compression value";
+        return_defer(STEG_ERR);
+    }
+    if (width % BLOCK_SIZE != 0 || height % BLOCK_SIZE != 0) {
+        steg__g_failure_reason = "The input data is not a multiple of the DCT block size.";
+        return_defer(STEG_ERR);
+    }
+    if (payload_length > width * height * num_chan / BLOCK_SIZE / BLOCK_SIZE) {
+        steg__g_failure_reason = "Payload is too large for the cover image";
+        return_defer(STEG_ERR);
+    }
+
+    normalized = AIDS_REALLOC(NULL, sizeof(double) * width * height * num_chan);
+    if (normalized == NULL) {
+        steg__g_failure_reason = aids_failure_reason();
+        return_defer(STEG_ERR);
+    }
+    for (size_t i = 0; i < width * height * num_chan; i++) {
+        normalized[i] = (double)bytes[i] / 255.0;
+    }
+
+    steg__hide_dct_helper(normalized, width, height, num_chan, (uint8_t*)&payload_length, sizeof(size_t), compression);
+    size_t offset = sizeof(size_t) * num_chan * BLOCK_SIZE * BLOCK_SIZE;
+    steg__hide_dct_helper(normalized + offset, width, height, num_chan, payload, payload_length, compression);
+
+    for (size_t i = 0; i < width * height * num_chan; i++) {
+        bytes[i] = (unsigned char)fmin(fmax(normalized[i] * 255.0, 0), 255);
+    }
+
+defer:
+    if (normalized != NULL) {
+        AIDS_FREE(normalized);
+    }
+
+    return result;
+}
+
+STEGDEF Steg_Result steg_show_dct(const uint8_t *bytes, size_t width, size_t height, size_t num_chan,
+                                  uint8_t **message, size_t *message_length, size_t compression) {
+    double *normalized = NULL;
+
+    Steg_Result result = STEG_OK;
+
+    if (!steg__validate_compression(compression)) {
+        steg__g_failure_reason = "Invalid compression value";
+        return_defer(STEG_ERR);
+    }
+    if (width % BLOCK_SIZE != 0 || height % BLOCK_SIZE != 0) {
+        steg__g_failure_reason = "The input data is not a multiple of the DCT block size.";
+        return_defer(STEG_ERR);
+    }
+
+    normalized = AIDS_REALLOC(NULL, sizeof(double) * width * height * num_chan);
+    if (normalized == NULL) {
+        steg__g_failure_reason = aids_failure_reason();
+        return_defer(STEG_ERR);
+    }
+    for (size_t i = 0; i < width * height * num_chan; i++) {
+        normalized[i] = (double)bytes[i] / 255.0;
+    }
+
+    steg__show_dct_helper(normalized, width, height, num_chan, (uint8_t*)message_length, sizeof(size_t), compression);
+    printf("Message length: %zu\n", *message_length);
+    if (*message_length <= 0) {
+        steg__g_failure_reason = "Message length is invalid";
+        return_defer(STEG_ERR);
+    }
+    if (*message_length > width * height * num_chan / BLOCK_SIZE / BLOCK_SIZE) {
+        steg__g_failure_reason = "Message length exceeds the maximum allowed size";
+        return_defer(STEG_ERR);
+    }
+    *message = AIDS_REALLOC(NULL, (*message_length + 1) * sizeof(unsigned char));
+    if (*message == NULL) {
+        steg__g_failure_reason = aids_failure_reason();
+        return_defer(STEG_ERR);
+    }
+    memset(*message, 0, (*message_length + 1) * sizeof(unsigned char));
+    size_t offset = sizeof(size_t) * num_chan * BLOCK_SIZE * BLOCK_SIZE;
+    steg__show_dct_helper(normalized + offset, width, height, num_chan, *message, *message_length, compression);
+
+defer:
+    if (normalized != NULL) {
+        AIDS_FREE(normalized);
     }
 
     return result;

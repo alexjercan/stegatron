@@ -3,7 +3,7 @@
 #include <math.h>
 #include <assert.h>
 
-#include "fft.h"
+#include "signal.h"
 
 void fft_simple(const complex double *x, unsigned long n, complex double *x_out) {
     for (size_t k = 0; k < n; k++) {
@@ -156,4 +156,42 @@ void ifft2d(const complex double *x, unsigned long width, unsigned long height, 
     }
 
     free(tmp);
+}
+
+static inline double alpha(int k) {
+    return (k == 0) ? sqrt(1.0 / BLOCK_SIZE) : sqrt(2.0 / BLOCK_SIZE);
+}
+
+void dct2d(const double x[BLOCK_SIZE][BLOCK_SIZE], double X[BLOCK_SIZE][BLOCK_SIZE]) {
+    for (size_t k1 = 0; k1 < BLOCK_SIZE; k1++) {
+        for (size_t k2 = 0; k2 < BLOCK_SIZE; k2++) {
+            double sum = 0;
+            for (size_t n1 = 0; n1 < BLOCK_SIZE; n1++) {
+                for (size_t n2 = 0; n2 < BLOCK_SIZE; n2++) {
+                    sum += x[n1][n2] *
+                        cos(M_PI / BLOCK_SIZE * (n1 + 0.5) * k1) *
+                        cos(M_PI / BLOCK_SIZE * (n2 + 0.5) * k2);
+                }
+            }
+
+            X[k1][k2] = alpha(k1) * alpha(k2) * sum;
+        }
+    }
+}
+
+void idct2d(const double X[BLOCK_SIZE][BLOCK_SIZE], double x[BLOCK_SIZE][BLOCK_SIZE]) {
+    for (size_t n1 = 0; n1 < BLOCK_SIZE; n1++) {
+        for (size_t n2 = 0; n2 < BLOCK_SIZE; n2++) {
+            double sum = 0;
+            for (size_t k1 = 0; k1 < BLOCK_SIZE; k1++) {
+                for (size_t k2 = 0; k2 < BLOCK_SIZE; k2++) {
+                    sum += alpha(k1) * alpha(k2) * X[k1][k2] *
+                        cos(M_PI / BLOCK_SIZE * (n1 + 0.5) * k1) *
+                        cos(M_PI / BLOCK_SIZE * (n2 + 0.5) * k2);
+                }
+            }
+
+            x[n1][n2] = sum;
+        }
+    }
 }
