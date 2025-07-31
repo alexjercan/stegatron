@@ -404,6 +404,7 @@ typedef struct {
     const char *image_path;  // Path to the image file
     const char *output_path; // Path to save the modified image
     const char *payload_path; // Path to the payload file (default: stdin)
+    size_t compression_level; // Compression level to use (default: 1)
 } Steg_Hide_Args_Dct;
 
 static int command_hide_dct(int argc, char **argv) {
@@ -432,6 +433,13 @@ static int command_hide_dct(int argc, char **argv) {
                                     .type = ARGUMENT_TYPE_VALUE,
                                     .required = false});
 
+    argparse_add_argument(
+        &parser, (Argparse_Options){.short_name = 'c',
+                                    .long_name = "compression",
+                                    .description = "Compression level (default: 1)",
+                                    .type = ARGUMENT_TYPE_VALUE,
+                                    .required = false});
+
     if (argparse_parse(&parser, argc, argv) != ARG_OK) {
         argparse_print_help(&parser);
         return AIDS_ERR;
@@ -440,6 +448,8 @@ static int command_hide_dct(int argc, char **argv) {
     args.image_path = argparse_get_value(&parser, "image");
     args.output_path = argparse_get_value_or_default(&parser, "output", NULL);
     args.payload_path = argparse_get_value_or_default(&parser, "payload", NULL);
+    const char *compression_str = argparse_get_value_or_default(&parser, "compression", "1");
+    args.compression_level = atoi(compression_str);
 
     argparse_parser_free(&parser);
 
@@ -458,7 +468,7 @@ static int command_hide_dct(int argc, char **argv) {
     const uint8_t *payload = (const uint8_t *)payload_slice.str;
     size_t payload_length = payload_slice.len;
 
-    if (steg_hide_dct(bytes, width, height, num_chan, (const uint8_t *)payload, payload_length, 1) != STEG_OK) {
+    if (steg_hide_dct(bytes, width, height, num_chan, (const uint8_t *)payload, payload_length, args.compression_level) != STEG_OK) {
         aids_log(AIDS_ERROR, "Error hiding message in image: %s", steg_failure_reason());
         exit(EXIT_FAILURE);
     }
@@ -488,6 +498,7 @@ static int command_hide_dct(int argc, char **argv) {
 typedef struct {
     const char *image_path; // Path to the image file
     const char *output_path; // Path to save the modified image (default: stdout)
+    size_t compression_level; // Compression level to use (default: 1)
 } Steg_Show_Args_Dct;
 
 static int command_show_dct(int argc, char **argv) {
@@ -510,6 +521,12 @@ static int command_show_dct(int argc, char **argv) {
                                     .description = "Path to save the modified image (default: stdout)",
                                     .type = ARGUMENT_TYPE_VALUE,
                                     .required = false});
+    argparse_add_argument(
+        &parser, (Argparse_Options){.short_name = 'c',
+                                    .long_name = "compression",
+                                    .description = "Compression level (default: 1)",
+                                    .type = ARGUMENT_TYPE_VALUE,
+                                    .required = false});
 
     if (argparse_parse(&parser, argc, argv) != ARG_OK) {
         argparse_print_help(&parser);
@@ -518,6 +535,8 @@ static int command_show_dct(int argc, char **argv) {
 
     args.image_path = argparse_get_value(&parser, "image");
     args.output_path = argparse_get_value_or_default(&parser, "output", NULL);
+    const char *compression_str = argparse_get_value_or_default(&parser, "compression", "1");
+    args.compression_level = atoi(compression_str);
 
     argparse_parser_free(&parser);
 
@@ -528,7 +547,7 @@ static int command_show_dct(int argc, char **argv) {
         exit(EXIT_FAILURE);
     }
 
-    if (steg_show_dct(bytes, width, height, num_chan, &message, &message_length, 1) != STEG_OK) {
+    if (steg_show_dct(bytes, width, height, num_chan, &message, &message_length, args.compression_level) != STEG_OK) {
         aids_log(AIDS_ERROR, "Error showing message from image: %s", steg_failure_reason());
         exit(EXIT_FAILURE);
     }

@@ -387,8 +387,8 @@ defer:
     return result;
 }
 
-#define COEFF_X 4
-#define COEFF_Y 3
+const size_t COEFF_Xs[4] = {4};
+const size_t COEFF_Ys[4] = {3};
 
 static bool steg__validate_compression_dct(size_t compression) {
     // TODO: Find some edge cases where this is not true
@@ -424,23 +424,24 @@ static void steg__hide_dct_helper(double *normalized, size_t width, size_t heigh
             double dct_block[BLOCK_SIZE][BLOCK_SIZE] = {0};
             dct2d(block, dct_block);
 
-            uint8_t byte = payload[byte_index];
-            char bit = (byte >> (BYTE_SIZE - bit_index - 1)) & 0b00000001;
+            for (size_t k = 0; k < compression; k++) {
+                uint8_t byte = payload[byte_index];
+                char bit = (byte >> (BYTE_SIZE - bit_index - 1)) & 0b00000001;
 
-            double coeff = dct_block[COEFF_X][COEFF_Y];
+                double coeff = dct_block[COEFF_Xs[k]][COEFF_Ys[k]];
 
-            // TODO: Handle compression
-            coeff = round(coeff) - ((int)coeff % 2) + bit;
-            dct_block[COEFF_X][COEFF_Y] = coeff;
+                coeff = round(coeff) - ((int)coeff % 2) + bit;
+                dct_block[COEFF_Xs[k]][COEFF_Ys[k]] = coeff;
+
+                bit_index++;
+                if (bit_index >= BYTE_SIZE) {
+                    bit_index = 0;
+                    byte_index++;
+                }
+            }
 
             idct2d(dct_block, block);
             block_to_array(block, width * num_chan, i, j, normalized);
-
-            bit_index += compression;
-            if (bit_index >= BYTE_SIZE) {
-                bit_index = 0;
-                byte_index++;
-            }
         }
     }
 }
@@ -458,18 +459,19 @@ static void steg__show_dct_helper(const double *normalized, size_t width, size_t
             double dct_block[BLOCK_SIZE][BLOCK_SIZE] = {0};
             dct2d(block, dct_block);
 
-            double coeff = dct_block[COEFF_X][COEFF_Y];
-            uint8_t bit = (uint8_t)((int)round(coeff) % 2) & 0b00000001;
-            byte |= (bit << (BYTE_SIZE - bit_index - 1));
-            // TODO: Handle compression
+            for (size_t k = 0; k < compression; k++) {
+                double coeff = dct_block[COEFF_Xs[k]][COEFF_Ys[k]];
+                uint8_t bit = (uint8_t)((int)round(coeff) % 2) & 0b00000001;
+                byte |= (bit << (BYTE_SIZE - bit_index - 1));
 
-            bit_index += compression;
-            if (bit_index >= BYTE_SIZE) {
-                message[byte_index] = byte;
+                bit_index += compression;
+                if (bit_index >= BYTE_SIZE) {
+                    message[byte_index] = byte;
 
-                byte_index++;
-                bit_index = 0;
-                byte = 0;
+                    byte_index++;
+                    bit_index = 0;
+                    byte = 0;
+                }
             }
         }
     }
