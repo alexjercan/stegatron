@@ -5,6 +5,12 @@
 #define HAMMING_N 7
 #define HAMMING_K 4
 
+const unsigned char H[HAMMING_N - HAMMING_K][HAMMING_N] = {
+    { 1, 1, 0, 1, 1, 0, 0 },
+    { 1, 0, 1, 1, 0, 1, 0 },
+    { 0, 1, 1, 1, 0, 0, 1 }
+};
+
 const unsigned char G[HAMMING_K][HAMMING_N] = {
     { 1, 0, 0, 0, 1, 1, 0 },
     { 0, 1, 0, 0, 1, 0, 1 },
@@ -36,8 +42,48 @@ static void hamming__helper_encode(unsigned char nibble, unsigned char *byte) {
 }
 
 static void hamming__helper_decode(unsigned char byte, unsigned char *nibble) {
+    unsigned char r[HAMMING_N] = {0};
+    for (size_t i = 0; i < HAMMING_N; i++) {
+        r[i] = (byte >> (HAMMING_N - i)) & 1;
+    }
+
+    unsigned char s[HAMMING_N - HAMMING_K] = {0};
+    for (size_t i = 0; i < HAMMING_N - HAMMING_K; i++) {
+        unsigned char sum = 0;
+        for (size_t j = 0; j < HAMMING_N; j++) {
+            sum += H[i][j] * r[j];
+        }
+        s[i] = (sum % 2) & 1;
+    }
+
+    size_t syndrome = 0;
+    for (size_t i = 0; i < HAMMING_N - HAMMING_K; i++) {
+        syndrome = syndrome | (s[i] << (HAMMING_N - HAMMING_K - i - 1));
+    }
+
+    if (syndrome == 0) {
+        *nibble = (byte >> 4) & 0b00001111;
+        return;
+    }
+
+    size_t index = 0;
+    for (size_t i = 0; i < HAMMING_N; i++) {
+        int matching = 1;
+        for (size_t j = 0; j < HAMMING_N - HAMMING_K; j++) {
+            if (s[j] != H[j][i]) {
+                matching = 0;
+                break;
+            }
+        }
+
+        if (matching == 1) {
+            index = i;
+            break;
+        }
+    }
+
+    byte = byte ^ (1 << (HAMMING_N - index));
     *nibble = (byte >> 4) & 0b00001111;
-    //TODO: actually check for errors
 }
 
 Ecc_Result hamming_encode(const unsigned char *a, unsigned long a_length, unsigned char **x, unsigned long *x_length) {

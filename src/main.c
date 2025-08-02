@@ -1,9 +1,11 @@
+#include <time.h>
 #include <assert.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "error.h"
 #include "steg.h"
 #include "stb_image.h"
 #include "stb_image_write.h"
@@ -19,6 +21,7 @@
 #define COMMAND_SHOW_FFT "show-fft"
 #define COMMAND_HIDE_DCT "hide-dct"
 #define COMMAND_SHOW_DCT "show-dct"
+#define COMMAND_NOISE_LSB "noise-lsb"
 #define COMMAND_VERSION "version"
 #define COMMAND_HELP "help"
 
@@ -27,6 +30,7 @@ typedef struct {
     const char *output_path; // Path to save the modified image
     const char *payload_path; // Path to the payload file (default: stdin)
     int compression_level;   // Compression level (default: 1)
+    bool ecc;               // Use error correction
 } Steg_Hide_Args_Lsb;
 
 static int command_hide_lsb(int argc, char **argv) {
@@ -63,6 +67,13 @@ static int command_hide_lsb(int argc, char **argv) {
                                     .type = ARGUMENT_TYPE_VALUE,
                                     .required = false});
 
+    argparse_add_argument(
+        &parser, (Argparse_Options){.short_name = 'e',
+                                    .long_name = "ecc",
+                                    .description = "Use Error Correction (default: false)",
+                                    .type = ARGUMENT_TYPE_FLAG,
+                                    .required = false});
+
 
     if (argparse_parse(&parser, argc, argv) != ARG_OK) {
         argparse_print_help(&parser);
@@ -74,6 +85,7 @@ static int command_hide_lsb(int argc, char **argv) {
     args.payload_path = argparse_get_value_or_default(&parser, "payload", NULL);
     const char *compression_str = argparse_get_value_or_default(&parser, "compression", "1");
     args.compression_level = atoi(compression_str);
+    args.ecc = argparse_get_flag(&parser, "ecc");
 
     argparse_parser_free(&parser);
 
@@ -90,8 +102,21 @@ static int command_hide_lsb(int argc, char **argv) {
         aids_log(AIDS_ERROR, "Error reading payload file: %s", aids_failure_reason());
         exit(EXIT_FAILURE);
     }
-    const uint8_t *payload = (const uint8_t *)payload_slice.str;
+    uint8_t *payload = (uint8_t *)payload_slice.str;
     size_t payload_length = payload_slice.len;
+
+    if (args.ecc) {
+        uint8_t *enc = NULL;
+        size_t enc_length = 0;
+        if (hamming_encode(payload, payload_length, &enc, &enc_length) != ECC_OK) {
+            aids_log(AIDS_ERROR, "Error encoding the message with Hamming Code");
+            exit(EXIT_FAILURE);
+        }
+
+        AIDS_FREE(payload);
+        payload = enc;
+        payload_length = enc_length;
+    }
 
     if (steg_hide_lsb(bytes, bytes_length, (const uint8_t *)payload, payload_length, args.compression_level) != STEG_OK) {
         aids_log(AIDS_ERROR, "Error hiding message in image: %s", steg_failure_reason());
@@ -108,6 +133,11 @@ static int command_hide_lsb(int argc, char **argv) {
 
     if (bytes != NULL) {
         stbi_image_free(bytes);
+        bytes = NULL;
+    }
+    if (payload != NULL) {
+        AIDS_FREE(payload);
+        payload = NULL;
     }
 
     return 0;
@@ -117,6 +147,7 @@ typedef struct {
     const char *image_path; // Path to the image file
     const char *output_path; // Path to save the modified image (default: stdout)
     int compression_level;  // Compression level (default: 1)
+    bool ecc;               // Use error correction
 } Steg_Show_Args_Lsb;
 
 static int command_show_lsb(int argc, char **argv) {
@@ -147,6 +178,13 @@ static int command_show_lsb(int argc, char **argv) {
                                     .type = ARGUMENT_TYPE_VALUE,
                                     .required = false});
 
+    argparse_add_argument(
+        &parser, (Argparse_Options){.short_name = 'e',
+                                    .long_name = "ecc",
+                                    .description = "Use Error Correction (default: false)",
+                                    .type = ARGUMENT_TYPE_FLAG,
+                                    .required = false});
+
     if (argparse_parse(&parser, argc, argv) != ARG_OK) {
         argparse_print_help(&parser);
         exit(EXIT_FAILURE);
@@ -156,6 +194,7 @@ static int command_show_lsb(int argc, char **argv) {
     args.output_path = argparse_get_value_or_default(&parser, "output", NULL);
     const char *compression_str = argparse_get_value_or_default(&parser, "compression", "1");
     args.compression_level = atoi(compression_str);
+    args.ecc = argparse_get_flag(&parser, "ecc");
 
     argparse_parser_free(&parser);
 
@@ -171,6 +210,19 @@ static int command_show_lsb(int argc, char **argv) {
     if (steg_show_lsb(bytes, bytes_length, &message, &message_length, args.compression_level) != STEG_OK) {
         aids_log(AIDS_ERROR, "Error showing message from image: %s", steg_failure_reason());
         exit(EXIT_FAILURE);
+    }
+
+    if (args.ecc) {
+        uint8_t *dec = NULL;
+        size_t dec_length = 0;
+        if (hamming_decode(message, message_length, &dec, &dec_length) != ECC_OK) {
+            aids_log(AIDS_ERROR, "Error decoding the message with Hamming Code");
+            exit(EXIT_FAILURE);
+        }
+
+        AIDS_FREE(message);
+        message = dec;
+        message_length = dec_length;
     }
 
     if (message_length > 0) {
@@ -201,9 +253,11 @@ static int command_show_lsb(int argc, char **argv) {
 
     if (bytes != NULL) {
         stbi_image_free(bytes);
+        bytes = NULL;
     }
     if (message != NULL) {
         AIDS_FREE(message);
+        message = NULL;
     }
 
     return 0;
@@ -588,6 +642,88 @@ static int command_show_dct(int argc, char **argv) {
     return 0;
 }
 
+typedef struct {
+    const char *image_path;  // Path to the image file
+    const char *output_path; // Path to save the modified image
+    int compression_level;   // Compression level (default: 1)
+} Steg_Noise_Args_Lsb;
+
+static int command_noise_lsb(int argc, char **argv) {
+    srand(time(NULL));
+
+    Steg_Noise_Args_Lsb args = {0};
+
+    Argparse_Parser parser = {0};
+    argparse_parser_init(&parser, PROGRAM_NAME " " COMMAND_NOISE_LSB, "Simulate noise in LSB", PROGRAM_VERSION);
+
+    argparse_add_argument(
+        &parser, (Argparse_Options){.short_name = 'i',
+                                    .long_name = "image",
+                                    .description = "Path to the image file",
+                                    .type = ARGUMENT_TYPE_POSITIONAL,
+                                    .required = true});
+    argparse_add_argument(
+        &parser,
+        (Argparse_Options){.short_name = 'o',
+                           .long_name = "output",
+                           .description = "Path to save the modified image (default: stdout)",
+                           .type = ARGUMENT_TYPE_VALUE,
+                           .required = true});
+
+    argparse_add_argument(
+        &parser, (Argparse_Options){.short_name = 'c',
+                                    .long_name = "compression",
+                                    .description = "Compression level (default: 1)",
+                                    .type = ARGUMENT_TYPE_VALUE,
+                                    .required = false});
+
+    if (argparse_parse(&parser, argc, argv) != ARG_OK) {
+        argparse_print_help(&parser);
+        exit(EXIT_FAILURE);
+    }
+
+    args.image_path = argparse_get_value(&parser, "image");
+    args.output_path = argparse_get_value_or_default(&parser, "output", NULL);
+    const char *compression_str = argparse_get_value_or_default(&parser, "compression", "1");
+    args.compression_level = atoi(compression_str);
+
+    argparse_parser_free(&parser);
+
+    int width, height, num_chan;
+    uint8_t *bytes = stbi_load(args.image_path, &width, &height, &num_chan, 0);
+    if (bytes == NULL) {
+        aids_log(AIDS_ERROR, "Error loading image: %s", stbi_failure_reason());
+        exit(EXIT_FAILURE);
+    }
+
+    // Insert dummy error
+    size_t stride = 8 / args.compression_level;
+    // TODO: add ecc on the length aswell to avoid this
+    for (size_t i = 8 * sizeof(size_t); i < (size_t)(width * height * num_chan); i += stride) {
+        if ((double)rand() / RAND_MAX >= 0.5) {
+            size_t byte_index = i + rand() % stride;
+            uint8_t byte = bytes[byte_index];
+            size_t index = rand() % args.compression_level;
+            byte = byte ^ (1 << index);
+            bytes[byte_index] = byte;
+            printf("%zu %zu\n", i, byte_index);
+        }
+    }
+
+    if (stbi_write_png(args.output_path, width, height, num_chan, bytes, width * num_chan) == 0) {
+        aids_log(AIDS_ERROR, "Error saving modified image: %s", stbi_failure_reason());
+        exit(EXIT_FAILURE);
+    }
+
+    aids_log(AIDS_INFO, "Noise added successfully in %s", args.output_path);
+
+    if (bytes != NULL) {
+        stbi_image_free(bytes);
+        bytes = NULL;
+    }
+
+    return 0;
+}
 
 static void usage() {
     fprintf(stdout, "usage: %s <SUBCOMMAND> [OPTIONS]\n", PROGRAM_NAME);
@@ -595,6 +731,7 @@ static void usage() {
     fprintf(stdout, "    %s - Show a hidden message in an image using LSB\n", COMMAND_SHOW_LSB);
     fprintf(stdout, "    %s - Hide a message in an image using FFT\n", COMMAND_HIDE_FFT);
     fprintf(stdout, "    %s - Show a hidden message in an image using FFT\n", COMMAND_SHOW_FFT);
+    fprintf(stdout, "    %s - Add noise in the LSB of the image\n", COMMAND_NOISE_LSB);
     fprintf(stdout, "    %s - Show the version of the program\n", COMMAND_VERSION);
     fprintf(stdout, "    %s - Show this help message\n", COMMAND_HELP);
     fprintf(stdout, "\n");
@@ -626,6 +763,8 @@ int main(int argc, char **argv) {
         return command_hide_dct(argc - 1, argv + 1);
     } else if (strcmp(argv[1], COMMAND_SHOW_DCT) == 0) {
         return command_show_dct(argc - 1, argv + 1);
+    } else if (strcmp(argv[1], COMMAND_NOISE_LSB) == 0) {
+        return command_noise_lsb(argc - 1, argv + 1);
     } else {
         fprintf(stderr, "Unknown command: %s\n", argv[1]);
         usage();
