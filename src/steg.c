@@ -57,18 +57,13 @@ STEGDEF Steg_Result steg_hide_lsb(uint8_t *bytes, size_t bytes_length,
     }
 
     size_t byte_stride = BYTE_SIZE / compression;
-    if (payload_length * byte_stride + sizeof(size_t) * byte_stride > bytes_length) {
+    if (payload_length * byte_stride > bytes_length) {
         steg__g_failure_reason = "Data is too big for the cover image";
         return_defer(STEG_ERR);
     }
 
-    for (size_t i = 0; i < sizeof(size_t); i++) {
-        unsigned char length_byte = ((unsigned char*)&payload_length)[i];
-        steg__util_hide_lsbn(bytes + i * byte_stride, length_byte, compression);
-    }
-
     for (size_t i = 0; i < payload_length; i++) {
-        steg__util_hide_lsbn(bytes + i * byte_stride + sizeof(size_t) * byte_stride, payload[i], compression);
+        steg__util_hide_lsbn(bytes + i * byte_stride, payload[i], compression);
     }
 
 defer:
@@ -76,7 +71,7 @@ defer:
 }
 
 STEGDEF Steg_Result steg_show_lsb(const uint8_t *bytes, size_t bytes_length,
-                                  uint8_t **message, size_t *message_length,
+                                  uint8_t *message, size_t message_length,
                                   int compression) {
     Steg_Result result = STEG_OK;
 
@@ -85,26 +80,16 @@ STEGDEF Steg_Result steg_show_lsb(const uint8_t *bytes, size_t bytes_length,
         return_defer(STEG_ERR);
     }
 
-    size_t byte_stride = BYTE_SIZE / compression;
-
-    for (size_t i = 0; i < sizeof(size_t); i++) {
-        steg__util_show_lsbn(bytes + i * byte_stride, ((unsigned char *)message_length) + i, compression);
-    }
-
-    if (*message_length * byte_stride + sizeof(size_t) * byte_stride > bytes_length) {
+    if (message_length * (BYTE_SIZE / compression) > bytes_length) {
         steg__g_failure_reason = "Data is too big for the cover image";
         return_defer(STEG_ERR);
     }
 
-    *message = AIDS_REALLOC(NULL, (*message_length + 1) * sizeof(unsigned char));
-    if (message == NULL) {
-        steg__g_failure_reason = "Memory allocation failed";
-        return_defer(STEG_ERR);
-    }
-    memset(*message, 0, (*message_length + 1) * sizeof(unsigned char));
+    size_t byte_stride = BYTE_SIZE / compression;
 
-    for (size_t i = 0; i < *message_length; i++) {
-        steg__util_show_lsbn(bytes + i * byte_stride + sizeof(size_t) * byte_stride, (*message) + i, compression);
+    memset(message, 0, message_length * sizeof(unsigned char));
+    for (size_t i = 0; i < message_length; i++) {
+        steg__util_show_lsbn(bytes + i * byte_stride, message + i, compression);
     }
 
 defer:

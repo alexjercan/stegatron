@@ -105,6 +105,18 @@ static int command_hide_lsb(int argc, char **argv) {
     uint8_t *payload = (uint8_t *)payload_slice.str;
     size_t payload_length = payload_slice.len;
 
+    uint8_t *payload_with_length = malloc(payload_length + sizeof(size_t));
+    if (payload_with_length == NULL) {
+        aids_log(AIDS_ERROR, "Memory allocation failed for payload with length");
+        exit(EXIT_FAILURE);
+    }
+    memcpy(payload_with_length, &payload_length, sizeof(size_t));
+    memcpy(payload_with_length + sizeof(size_t), payload, payload_length);
+
+    AIDS_FREE(payload);
+    payload = payload_with_length;
+    payload_length += sizeof(size_t); // Include the length prefix
+
     if (args.ecc) {
         uint8_t *enc = NULL;
         size_t enc_length = 0;
@@ -152,7 +164,6 @@ typedef struct {
 
 static int command_show_lsb(int argc, char **argv) {
     Steg_Show_Args_Lsb args = {0};
-    uint8_t *message = NULL;
 
     Argparse_Parser parser = {0};
     argparse_parser_init(&parser, PROGRAM_NAME " " COMMAND_SHOW_LSB, "Show a hidden message in an image", PROGRAM_VERSION);
@@ -206,8 +217,9 @@ static int command_show_lsb(int argc, char **argv) {
     }
     size_t bytes_length = width * height * num_chan;
 
-    size_t message_length = 0;
-    if (steg_show_lsb(bytes, bytes_length, &message, &message_length, args.compression_level) != STEG_OK) {
+    size_t message_length = bytes_length / 8 * args.compression_level;
+    uint8_t *message = malloc(message_length * sizeof(uint8_t));
+    if (steg_show_lsb(bytes, bytes_length, message, message_length, args.compression_level) != STEG_OK) {
         aids_log(AIDS_ERROR, "Error showing message from image: %s", steg_failure_reason());
         exit(EXIT_FAILURE);
     }
@@ -224,6 +236,10 @@ static int command_show_lsb(int argc, char **argv) {
         message = dec;
         message_length = dec_length;
     }
+
+    message_length = *(size_t *)message;
+    memcpy(message, message + sizeof(size_t), message_length);
+    message = AIDS_REALLOC(message, message_length * sizeof(uint8_t));
 
     if (message_length > 0) {
         if (args.output_path == NULL) {
@@ -698,15 +714,13 @@ static int command_noise_lsb(int argc, char **argv) {
 
     // Insert dummy error
     size_t stride = 8 / args.compression_level;
-    // TODO: add ecc on the length aswell to avoid this
-    for (size_t i = 8 * sizeof(size_t); i < (size_t)(width * height * num_chan); i += stride) {
+    for (size_t i = 0; i < (size_t)(width * height * num_chan); i += stride) {
         if ((double)rand() / RAND_MAX >= 0.5) {
             size_t byte_index = i + rand() % stride;
             uint8_t byte = bytes[byte_index];
             size_t index = rand() % args.compression_level;
             byte = byte ^ (1 << index);
             bytes[byte_index] = byte;
-            printf("%zu %zu\n", i, byte_index);
         }
     }
 
